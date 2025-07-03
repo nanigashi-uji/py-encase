@@ -17,6 +17,9 @@ import getpass
 import socket
 
 class PyEncase(object):
+
+    VERSION    = '0.0.2'
+
     MNG_SCRIPT = 'mng_encase'
     MNG_OPT    = '--manage'
 
@@ -143,7 +146,7 @@ class PyEncase(object):
                 scriptname = self.path_invoked.name
                 scriptargs = rest
             else:
-                argprsr.add_argument('script', help='script name/path')
+                argprsr.add_argument('script', nargs='?', default=None, const=None, help='script name/path')
                 narg,rest = argprsr.parse_known_args()
                 scriptname = narg.script
                 scriptargs = rest
@@ -356,22 +359,27 @@ class PyEncase(object):
                                                  self.python_pip_path,
                                                  os.environ.get('PYTHONPATH',''))
 
-        script_path = os.path.join(self.python_path, script if script.endswith('.py') else script+'.py')
+        if script is None:
+            cmd_args = [self.python_use ] + args
+        elif isinstance(script, str) and script and os.path.isfile(script):
+            cmd_args = [self.python_use, script ] + args
+        else:
+            script_path = os.path.join(self.python_path, script if script.endswith('.py') else script+'.py')
+            
+            if os.path.isdir(script_path):
+                sys.stderr.write("[%s.%s:%d] Error: '%s' is directory\n" %
+                                 (self.__class__.__name__, 
+                                  inspect.currentframe().f_code.co_name,
+                                  inspect.currentframe().f_lineno, script_path))
+                raise IsADirectoryError()
+            elif not os.path.isfile(script_path):
+                sys.stderr.write("[%s.%s:%d] Error: File not found '%s'\n" %
+                                 (self.__class__.__name__, 
+                                  inspect.currentframe().f_code.co_name,
+                                  inspect.currentframe().f_lineno, script_path))
+                raise FileNotFoundError()
 
-        if os.path.isdir(script_path):
-            sys.stderr.write("[%s.%s:%d] Error: '%s' is directory\n" %
-                             (self.__class__.__name__, 
-                              inspect.currentframe().f_code.co_name,
-                              inspect.currentframe().f_lineno, script_path))
-            raise IsADirectoryError()
-        elif not os.path.isfile(script_path):
-            sys.stderr.write("[%s.%s:%d] Error: File not found '%s'\n" %
-                             (self.__class__.__name__, 
-                              inspect.currentframe().f_code.co_name,
-                              inspect.currentframe().f_lineno, script_path))
-            raise FileNotFoundError()
-
-        cmd_args = [self.python_use, script_path ] + args
+            cmd_args = [self.python_use, script_path ] + args
 
         if self.verbose:
             sys.stderr.write("[%s.%s:%d] Exec: '%s' with PYTHONPATH='%s'\n" %
@@ -840,9 +848,21 @@ class PyEncase(object):
                                                                   dest_dir=self.tmpdir,
                                                                   verbose=verbose,
                                                                   dry_run=dry_run)
-            buf = readme_updater.proc_file(in_file=readme_bkup, 
-                                           out_file=readme_path, encoding=self.encoding,
-                                           verbose=verbose, dry_run=dry_run)
+            if readme_bkup is None:
+                contents = readme_updater.readme_contents(format_alist=keywords)
+                if verbose or dry_run:
+                    sys.stderr.write("[%s.%s:%d] : Save Readme file : '%s'\n" %
+                                     (self.__class__.__name__, 
+                                      inspect.currentframe().f_code.co_name,
+                                      inspect.currentframe().f_lineno, readme_path))
+                if not dry_run:
+                    fout = open(readme_path, "w", encoding=self.encoding)
+                    fout.write(contents)
+                    fout.close()
+            else:
+                buf = readme_updater.proc_file(in_file=readme_bkup, 
+                                               out_file=readme_path, encoding=self.encoding,
+                                               verbose=verbose, dry_run=dry_run)
         else:
             contents = readme_updater.readme_contents(format_alist=keywords)
             if verbose or dry_run:
@@ -940,7 +960,6 @@ class PyEncase(object):
         m = cls.STLIPTQ.search(text.strip())
         return m.group('barestring') if m else text
 
-
     def gitignore_contents(self, format_alist={}, **format_args):
         str_format={'____GIT_DUMMYFILE____': self.__class__.FILENAME_DEFAULT['____GIT_DUMMYFILE____'] }
         str_format.update(format_alist)
@@ -1025,14 +1044,14 @@ class PyEncase(object):
         gitcmdio = subprocess.run([gitcmd, 'config', '--local', '--get', 'user.name'],
                                   encoding='utf-8', stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if gitcmdio.returncode==0:
-            return gitcmdio.stdout
+            return gitcmdio.stdout.rstrip(os.linesep)
 
         gitcmdio = subprocess.run([gitcmd, 'config', '--global', '--get', 'user.name'],
                                   encoding='utf-8', stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if gitcmdio.returncode==0:
-            return gitcmdio.stdout
+            return gitcmdio.stdout.rstrip(os.linesep)
 
-        return getpass.getuser()
+        return getpass.getuser().rstrip(os.linesep)
 
     @classmethod
     def guess_git_useremail(cls):
@@ -1041,20 +1060,20 @@ class PyEncase(object):
         gitcmdio = subprocess.run([gitcmd, 'config', '--local', '--get', 'user.email'],
                                   encoding='utf-8', stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if gitcmdio.returncode==0:
-            return gitcmdio.stdout
+            return gitcmdio.stdout.rstrip(os.linesep)
 
         gitcmdio = subprocess.run([gitcmd, 'config', '--global', '--get', 'user.email'],
                                   encoding='utf-8', stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if gitcmdio.returncode==0:
-            return gitcmdio.stdout
+            return gitcmdio.stdout.rstrip(os.linesep)
 
-        return getpass.getuser()+'@'+socket.gethostname()
+        return (getpass.getuser()+'@'+socket.gethostname()).rstrip(os.linesep)
 
 
     class ReadMeUpdater(object):
         CNTNTS_HD_MRKR  = re.compile(r"^ *- *Contents:")
         CNTNTS_TL_MRKR  = re.compile(r"^ *- *Usage.*:")
-        CNTNTS_IDX_MRKR = re.compile(r"^ +(?P<index>[0-9]+)\. +(?P<file_path>[^\b][^:]+) *:")
+        CNTNTS_IDX_MRKR = re.compile(r"^ +(?P<index>[0-9]+)\. +(?P<file_path>[^\b][^:]+) *: *(?P<desc>\S.*)$")
         GITIGNORE_RE    = re.compile(r"\.gitignore")
         USAGE_RE        = CNTNTS_TL_MRKR
         
@@ -1115,22 +1134,23 @@ class PyEncase(object):
 
                 if self.__class__.CNTNTS_HD_MRKR.match(line):
                     flg_in_range = True
-        
-                if flg_in_range:
-                    if ( (not flg_added) and ((self.__class__.GITIGNORE_RE.search(line) 
-                                               or self.__class__.USAGE_RE.match(line)))):
-
+                if self.__class__.CNTNTS_TL_MRKR.match(line):
+                    if ( (not flg_added) and (self.__class__.USAGE_RE.match(line))):
                         block, fidx = self.make_additional_block(fidx, file_listed)
                         for b in block:
                             yield b
+                        yield "\n"
                         added = True
         
+                    flg_in_range = False
+        
+                if flg_in_range:
                     f_match=self.__class__.CNTNTS_IDX_MRKR.match(line)
                     if f_match:
                         fidx += 1
-                        indent_width = line.find('.') - len(str(fidx))
-                        indent = ' ' * max(indent_width, 0)
-                        line = self.__class__.CNTNTS_IDX_MRKR.sub(f"{indent}{fidx}. ", line, count=1)
+                        line = "  %-3s %-42s %s" % ( ("%d." % (fidx,)),
+                                                     f_match.group('file_path')+":",
+                                                     f_match.group('desc'))
                         file_listed[f_match.group('file_path')] = f_match.group('index')
         
                 if flg_in_range and self.__class__.CNTNTS_TL_MRKR.match(line):
@@ -1142,27 +1162,24 @@ class PyEncase(object):
             buf = []
             f = start_idx
 
-            def add(line: str):
-                buf.append(line)
-
             for bn in self.bin_basenames:
                 scr_subpath = os.path.join(self.python_subdir,bn+'.py')
                 if not scr_subpath in file_listed.keys():
                     f += 1
-                    add("  %-3s %-42s Example Python script that use modules\n" % ("%d." % (f,), scr_subpath+':'))
+                    buf.append("  %-3s %-42s Example Python script that use modules\n" % ("%d." % (f,), scr_subpath+':'))
 
-                bin_subpath = os.path.join(self.bin_subdir,bn)
+                bin_subpath = os.path.join(self.bin_subdir, bn)
                 if not bin_subpath in file_listed.keys():
                     f += 1
-                    add("  %-3s %-42s Symbolic link to %s to invoke %s.py.\n" % ("%d." % (f,), bin_subpath, 
+                    buf.append("  %-3s %-42s Symbolic link to %s to invoke %s.py.\n" % ("%d." % (f,), bin_subpath+':', 
                                                                                 os.path.basename(__file__), bn))
             for bn in self.lib_basenames:
-                scr_subpath = os.path.join(self.python_subdir,bn+'.py')
+                scr_subpath = os.path.join(self.python_subdir, bn+'.py')
                 if scr_subpath in file_listed.keys():
                     continue
                 f += 1
-                add("  %-3s %-42s Python Library script used in this package\n\n" % ("%d." % (f,), scr_subpath+':'))
-        
+                buf.append("  %-3s %-42s Python Library script used in this package\n" % ("%d." % (f,), scr_subpath+':'))
+
             return buf, f
 
         def readme_contents(self, bin_basenames=None, lib_basenames=None, gitkeepdirs=None, format_alist={}, **format_args):
@@ -1228,7 +1245,7 @@ class PyEncase(object):
                 contents_list.append([os.path.join(self.bin_subdir, _scr_bn),
                                       ( "Symbolic link to '%s' to invoke %s.py." 
                                         % (str_format['____SHSCRIPT_ENTITY_NAME____'], _scr_bn))])
-            contents_list.append("\n")
+                #contents_list.append("\n")
 
             lib_desc_default = 'Example Python module file by template'
             for _lib in lib_bns:
@@ -1250,9 +1267,9 @@ class PyEncase(object):
                                                              (str(descinfo[1]) if len(descinfo)>1 else '' ))
                     desc_idx += 1
                 else:
-                    contents_lines += (descinfo if isinstance(descinfo,str) else "\n")
+                    contents_lines += (descinfo if isinstance(descinfo,str) else "")
 
-                    str_format.update({'____contents_lines____': contents_lines})
+            str_format.update({'____contents_lines____': contents_lines.rstrip(os.linesep)})
 
             frm    = inspect.currentframe()
             func   = self.__class__.__dict__[frm.f_code.co_name]
