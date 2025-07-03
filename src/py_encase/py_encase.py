@@ -15,10 +15,13 @@ import typing
 import io
 import getpass
 import socket
+import json
 
 class PyEncase(object):
 
-    VERSION    = '0.0.2'
+    VERSION          = '0.0.3'
+    PIP_MODULE_NAME  = 'py-encase'
+    ENTYTY_FILE_NAME = pathlib.Path(__file__).resolve().name
 
     MNG_SCRIPT = 'mng_encase'
     MNG_OPT    = '--manage'
@@ -178,6 +181,8 @@ class PyEncase(object):
             sbprsrs = argprsrm.add_subparsers(dest='subcommand')
             
             parser_add_info = sbprsrs.add_parser('info', help='Show information')
+            parser_add_info.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
+            parser_add_info.add_argument('-l', '--long', action='store_true', help='Show all information')
             parser_add_info.set_defaults(handler=self.show_info)
 
             parser_add_init = sbprsrs.add_parser('init', help='Initialise Environment')
@@ -265,6 +270,13 @@ class PyEncase(object):
             parser_add_distclean.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
             parser_add_distclean.set_defaults(handler=self.clean_env)
 
+            parser_add_selfupdate = sbprsrs.add_parser('selfupdate', help='Self update of '+os.path.basename(__file__))
+            parser_add_selfupdate.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
+            parser_add_selfupdate.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+            parser_add_selfupdate.add_argument('-f', '--force-install', action='store_true', help='Force install')
+
+            parser_add_selfupdate.set_defaults(handler=self.self_update)
+
             for c,cc in self.__class__.PIP_SBCMDS_ACCEPT.items():
                 _scmd = c if cc is None else cc
                 _prsr_add = sbprsrs.add_parser(_scmd, 
@@ -306,8 +318,90 @@ class PyEncase(object):
                 return 1
         return 0
 
+    def self_update(self, args:argparse.Namespace, rest:list=[]):
+        subcmd = args.subcommand if hasattr(args, 'subcommand') else 'unknown'
+        self.set_python_path(python_cmd=(args.python if (hasattr(args, 'python') and
+                                                         args.python is not None) else self.python_select),
+                             pip_cmd=(args.pip if (hasattr(args, 'pip') and
+                                                   args.pip is not None) else str(self.pip_use)),
+                             prefix_cmd=( args.prefix if (hasattr(args, 'prefix') and
+                                                          args.prefix  is not None) else self.prefix))
+        flg_verbose   = args.verbose       if hasattr(args, 'verbose')       else self.verbose
+        flg_dry_run   = args.dry_run       if hasattr(args, 'dry_run')       else False
+        force_install = args.force_install if hasattr(args, 'force_install') else False
 
-    def run_pip(self, subcmd:str, args=[], verbose=False, dry_run=False):
+        pip_install_out = self.run_pip(subcmd='install', 
+                                       args=['--upgrade', '--force-reinstall', 
+                                             self.__class__.PIP_MODULE_NAME],
+                                       verbose=flg_verbose, dry_run=False)
+
+        pip_list_out = self.run_pip(subcmd='list', args=['--format', 'json'],
+                                    verbose=flg_verbose, dry_run=False, capture_output=True)
+        pip_installed = json.loads(pip_list_out.stdout)
+        latest_version="0.0.0"
+        for minfo in pip_installed:
+            if ( (not isinstance(minfo, dict)) or 
+                 minfo.get('name', "") != self.__class__.PIP_MODULE_NAME):
+                continue
+            latest_version=minfo.get('version', "0.0.0")
+
+        if self.__class__.version_compare(self.__class__.VERSION, latest_version)<0 or force_install:
+            orig_path = self.path_invoked.resolve()
+            if orig_path.name != self.__class__.ENTYTY_FILE_NAME:
+                sys.stderr.write("[%s.%s:%d] selfupdate: Current version=='%s', Latest version=='%s', Force install?: %s \n" %
+                                 (self.__class__.__name__, 
+                                  inspect.currentframe().f_code.co_name,
+                                  inspect.currentframe().f_lineno,
+                                  self.__class__.VERSION, latest_version, str(force_install)))
+                raise ValueError("Filename is not proper: '"+orig_path.name+"' != '"+self.__class__.ENTYTY_FILE_NAME+"'")
+
+            if flg_verbose or dry_run:
+                sys.stderr.write("[%s.%s:%d] selfupdate: Current version=='%s', Latest version=='%s', Force install?: %s \n" %
+                                 (self.__class__.__name__, 
+                                  inspect.currentframe().f_code.co_name,
+                                  inspect.currentframe().f_lineno,
+                                  self.__class__.VERSION, latest_version, str(force_install)))
+
+            new_version_path = os.path.join(self.python_pip_path,
+                                            self.__class__.PIP_MODULE_NAME.replace('-', '_'),
+                                            self.__class__.ENTYTY_FILE_NAME)
+            
+            if not os.path.isfile(new_version_path):
+                sys.stderr.write("[%s.%s:%d] selfupdate: Internal error: file not found: '%s'\n" %
+                                 (self.__class__.__name__, 
+                                  inspect.currentframe().f_code.co_name,
+                                  inspect.currentframe().f_lineno,
+                                  self.__class__.VERSION, latest_version, str(force_install)))
+                raise FileNotFoundError("Is not file: "+new_version_path)
+
+            bkup_path = self.__class__.rename_with_mtime_suffix(orig_path,
+                                                                add_sufix=("-"+self.__class__.VERSION),
+                                                                dest_dir=self.tmpdir,
+                                                                verbose=flg_verbose,
+                                                                dry_run=flg_dry_run)
+            if flg_verbose or flg_dry_run:
+                sys.stderr.write("[%s.%s:%d] selfupdate: Backup current file: '%s' --> '%s'\n" %
+                                 (self.__class__.__name__, 
+                                  inspect.currentframe().f_code.co_name,
+                                  inspect.currentframe().f_lineno, orig_path, bkup_path))
+                                 
+            if flg_verbose or flg_dry_run:
+                sys.stderr.write("[%s.%s:%d] selfupdate: Copy file: '%s' --> '%s'\n" %
+                                 (self.__class__.__name__, 
+                                  inspect.currentframe().f_code.co_name,
+                                  inspect.currentframe().f_lineno, new_version_path, orig_path))
+            if not flg_dry_run:
+                shutil.copy2(new_version_path, orig_path, follow_symlinks=True)
+                os.chmod(orig_path, mode=0o755, follow_symlinks=True)
+        else:
+            if flg_verbose:
+                sys.stderr.write("[%s.%s:%d] selfupdate: skip (up-to-date) : Current version=='%s', Latest version=='%s', Force install?: %s \n" %
+                                 (self.__class__.__name__, 
+                                  inspect.currentframe().f_code.co_name,
+                                  inspect.currentframe().f_lineno,
+                                  self.__class__.VERSION, latest_version, str(force_install)))
+
+    def run_pip(self, subcmd:str, args=[], verbose=False, dry_run=False, **popen_kwargs):
         
         argprsrx = argparse.ArgumentParser(add_help=False, exit_on_error=False)
         argprsrx.add_argument('--isolated',  action='store_true')
@@ -352,7 +446,8 @@ class PyEncase(object):
                               inspect.currentframe().f_code.co_name,
                               inspect.currentframe().f_lineno, (" ".join(cmdargs))))
         if not dry_run:
-            subprocess.run(cmdargs, shell=False)
+            return subprocess.run(cmdargs, shell=False,
+                                  encoding=self.encoding, **popen_kwargs)
 
     def run_script(self, script:str, args:list=[]):
         os.environ['PYTHONPATH'] = "%s:%s:%s" % (self.python_path,
@@ -391,11 +486,22 @@ class PyEncase(object):
         sys.stderr.flush()
         os.execvpe(cmd_args[0], cmd_args, os.environ)
 
+
+    def description(self):
+        return "%s (Version: %s : %s)" % (self.__class__.PIP_MODULE_NAME, 
+                                          self.__class__.VERSION, 
+                                          pathlib.Path(__file__).resolve())
+
     def show_info(self, args:argparse.Namespace, rest:list=[]):
 
         flg_verbose = args.verbose if hasattr(args, 'verbose') else self.verbose
-        flg_dry_run = args.dry_run if hasattr(args, 'dry_run') else False
+        flg_long    = args.long    if hasattr(args, 'long')    else False
 
+        if not(flg_verbose or flg_long):
+            print(self.description())
+            return
+
+        print("Description            : ", self.description())
         print("Python command         : ", str(self.python_use))
         print("Python select          : ", self.python_select)
         print("Python full path       : ", self.python_use.absolute())
@@ -519,7 +625,7 @@ class PyEncase(object):
 
 
     @classmethod
-    def rename_with_mtime_suffix(cls, file_path, dest_dir=None, verbose=False, dry_run=False):
+    def rename_with_mtime_suffix(cls, file_path, add_sufix=None, dest_dir=None, verbose=False, dry_run=False):
         if not os.path.exists(file_path):
             if verbose or dry_run:
                 sys.stderr.write("[%s.%s:%d] File not found : '%s' \n" %
@@ -534,7 +640,10 @@ class PyEncase(object):
         bn, ext = os.path.splitext(os.path.basename(file_path))
         dest = os.path.dirname(file_path) if dest_dir is None else dest_dir
         
-        new_path = os.path.join(dest, ("%s.%s%s" % (bn, tmstmp, ext)))
+        if isinstance(add_sufix,str) and add_sufix:
+            new_path = os.path.join(dest, ("%s%s.%s%s" % (bn, add_sufix, tmstmp, ext)))
+        else:
+            new_path = os.path.join(dest, ("%s.%s%s" % (bn, tmstmp, ext)))
 
         if not os.path.isdir(dest):
             if verbose or dry_run:
