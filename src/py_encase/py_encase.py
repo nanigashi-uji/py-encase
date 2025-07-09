@@ -20,7 +20,7 @@ import json
 
 class PyEncase(object):
 
-    VERSION          = '0.0.5'
+    VERSION          = '0.0.6'
     PIP_MODULE_NAME  = 'py-encase'
     ENTYTY_FILE_NAME = pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name
     #    ENTYTY_FILE_NAME = pathlib.Path(__file__).resolve().name
@@ -524,11 +524,16 @@ class PyEncase(object):
                                   inspect.currentframe().f_lineno, script_path))
                 raise IsADirectoryError()
             elif not os.path.isfile(script_path):
-                sys.stderr.write("[%s.%s:%d] Error: File not found '%s'\n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno, script_path))
-                raise FileNotFoundError()
+
+                pip_bin_path = os.path.join(self.python_pip_path, 'bin', script.removesuffix('.py') if script.endswith('.py') else script)
+                if not os.path.isfile(pip_bin_path):
+                    sys.stderr.write("[%s.%s:%d] Error: File not found: '%s', '%s'\n" %
+                                     (self.__class__.__name__, 
+                                      inspect.currentframe().f_code.co_name,
+                                      inspect.currentframe().f_lineno, script_path, pip_bin_path))
+                    raise FileNotFoundError()
+                else:
+                    script_path = pip_bin_path
 
             cmd_args = [self.python_use, script_path ] + args
 
@@ -1150,6 +1155,7 @@ class PyEncase(object):
                 '____py_shebang_pattern____' : newmodule_shebang,
                 '____README_NAME____' : self.__class__.FILENAME_DEFAULT.get('____README_NAME____', 'README.md'),
                 '____TITLE____':              title,
+                '____PIP_MODULE_NAME____': self.__class__.ENTYTY_FILE_NAME,
             })
 
             new_module_top = os.path.join(module_src_top, module_name)
@@ -2810,8 +2816,13 @@ if __name__=='__main__':
         MOD_VERSION := $(shell env PYTHONPATH=$(PYTMPDIR):$(PYTHONPATH) $(PYTHON) -c "import sys,toml;sys.stdout.write(toml.load('pyproject.toml').get('project')['version'])")
         
         MOD_TEST_OPT = -h
+
+        PYVERSTR       ?= $(shell $(PYTHON) -c 'import sys; sys.stdout.write(".".join([str(i) for i in sys.version_info[0:3]]))')
+        LOCAL_DESTDIR  ?= $(MAKEFILE_DIR)/../../lib/python/site-packages/$(PYVERSTR)
+        LOCAL_BINDIR   ?= $(MAKEFILE_DIR)/../../bin/
+        PYENCASE       ?= {____PIP_MODULE_NAME____}
         
-        .PHONY: info clean sdist test_src test_dist test_upload upload clean distclean
+        .PHONY: info clean sdist test_src test_dist test_upload upload clean distclean install_local
         
         info:
         	@echo 'Module name         : '$(MODULE_NAME)
@@ -2841,6 +2852,12 @@ if __name__=='__main__':
         	env PYTHONPATH=$(MOD_TEST_DIR_DIST):$(PYTHONPATH) $(PIP) install --target $(MOD_TEST_DIR_DIST) $(MAKEFILE_DIR)/dist/$(MODULE_SPATH)-$(MOD_VERSION).tar.gz
         	env PYTHONPATH=$(MOD_TEST_DIR_DIST):$(PYTHONPATH) $(MOD_TEST_DIR_DIST)/bin/$(MODULE_NAME) $(MOD_TEST_OPT)
         
+        install_local: 
+        	-mkdir -p $(LOCAL_DESTDIR)
+        	-env PYTHONPATH=$(MOD_TEST_DIR_SRC):$(PYTHONPATH) $(PIP) install --target $(LOCAL_DESTDIR) $(notdir $(MOD_DEPENDENCIES))
+        	env  PYTHONPATH=$(MOD_TEST_DIR_SRC):$(PYTHONPATH) $(PIP) install --target $(LOCAL_DESTDIR) $(MAKEFILE_DIR)
+        	if [ -f $(LOCAL_BINDIR)/$(PYENCASE) ] ; then (cd $(LOCAL_BINDIR); ln -s $(PYENCASE) $(MODULE_NAME) ) ; fi
+
         $(MAKEFILE_DIR)/dist/$(MODULE_SPATH)-$(MOD_VERSION).tar.gz: sdist
         
         $(MOD_TEST_DIR_SRC):

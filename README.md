@@ -82,20 +82,19 @@ Please refer the help messages for further usage.
 ```
 % ${prefix}/bin/mng_encase --help
 
-usage: mng_encase [-P PYTHON] [-I PIP] [-p PREFIX] [-G GIT_COMMAND]
-                  [-v] [-n] [-h]
-                  {info,init,add,addlib,clean,distclean,install,
-                   download,freeze,inspect,list,cache,piphelp} ...
+usage: mng_encase [-P PYTHON] [-I PIP] [-p PREFIX] [-G GIT_COMMAND] [-v] [-n] [-h]
+                  {info,init,add,addlib,newmodule,clean,distclean,selfupdate,install,download,freeze,inspect,list,cache,piphelp} ...
 
 positional arguments:
-  {info,init,add,addlib,clean,distclean,install,
-   download,freeze,inspect,list,cache,piphelp}
+  {info,init,add,addlib,newmodule,clean,distclean,selfupdate,install,download,freeze,inspect,list,cache,piphelp}
     info                Show information
     init                Initialise Environment
     add                 add new script files
     addlib              add new script files
+    newmodule           add new module source
     clean               clean-up
     distclean           Entire clean-up
+    selfupdate          Self update of py_encase.py
     install             PIP command : install
     download            PIP command : download
     freeze              PIP command : freeze
