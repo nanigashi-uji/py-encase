@@ -13,13 +13,14 @@ import textwrap
 import re
 import typing
 import io
+import itertools
 import getpass
 import socket
 import json
 
 class PyEncase(object):
 
-    VERSION          = '0.0.4'
+    VERSION          = '0.0.5'
     PIP_MODULE_NAME  = 'py-encase'
     ENTYTY_FILE_NAME = pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name
     #    ENTYTY_FILE_NAME = pathlib.Path(__file__).resolve().name
@@ -48,6 +49,8 @@ class PyEncase(object):
     FILENAME_DEFAULT = { '____GIT_DUMMYFILE____': '.gitkeep',
                          '____README_NAME____':   'README.md',
                         }
+
+    SHEBANG_DEFAULT = '#!/usr/bin/env python3'
 
     def __init__(self, argv:list=sys.argv, 
                  python_cmd:str=None, pip_cmd:str=None, 
@@ -258,6 +261,54 @@ class PyEncase(object):
                                                                                                 +'"'))
             parser_add_addlib.add_argument('script_lib', nargs='+', help='all files')
             parser_add_addlib.set_defaults(handler=self.manage_env)
+
+
+
+            parser_add_newmodule = sbprsrs.add_parser('newmodule', help='add new module source')
+            parser_add_newmodule.add_argument('-P', '--python', default=None, help='Python path / command')
+            parser_add_newmodule.add_argument('-I', '--pip',  default=None, help='PIP path / command')
+            parser_add_newmodule.add_argument('-p', '--prefix',  default=self.prefix, help=('prefix of the directory tree. ' +
+                                                                                         '(Default: Grandparent directory' +
+                                                                                         ' if the name of parent directory of %s is bin,'
+                                                                                         ' otherwise current working directory.' 
+                                                                                        % (self.path_invoked.name, )))
+            parser_add_newmodule.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
+            parser_add_newmodule.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
+            parser_add_newmodule.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+
+            parser_add_newmodule.add_argument('-S', '--set-shebang', action='store_true', help='Set shebang based on the local environment')
+
+            parser_add_newmodule.add_argument('-R', '--no-readme', action='store_false', dest='readme',
+                                              default='True', help='NO README.md created')
+            parser_add_newmodule.add_argument('-b', '--no-git-file', action='store_false', dest='git',
+                                              default='True', help='NO README.md created')
+
+
+            parser_add_newmodule.add_argument('-e', '--git-email',  type=str, help='git user e-mail address')
+            parser_add_newmodule.add_argument('-u', '--git-user',   type=str, help='git user name ')
+            parser_add_newmodule.add_argument('-z', '--git-protocol',   choices=('https', 'ssh'), default='ssh', help='git protocol')
+            parser_add_newmodule.add_argument('-U', '--git-remote-url', type=str, help='git remote URL')
+
+            parser_add_newmodule.add_argument('-W', '--module-website', default=[], action='append', help='New module URL')
+            parser_add_newmodule.add_argument('-H', '--git-hosting',    type=str, help='github or gitlab or URL')
+            parser_add_newmodule.add_argument('-a', '--gitxxb-account', type=str, help='github/gitlab accountname')
+
+            parser_add_newmodule.add_argument('-y', '--git-set-upstream', action='store_true', default=False, help='git set upstream')
+
+            parser_add_newmodule.add_argument('-d', '--description',  help='Project description')
+            parser_add_newmodule.add_argument('-t', '--title',        help='Project title')
+            parser_add_newmodule.add_argument('-C', '--class-name', default=[], action='append', help='Module class name')
+            parser_add_newmodule.add_argument('-m', '--module', default=[], action='append', help='required (external) modules used by new modules')
+            parser_add_newmodule.add_argument('-k', '--keywords', default=[], action='append', help='keywords related to new modules')
+            parser_add_newmodule.add_argument('-c', '--classifiers', default=[], action='append', help='keywords related to new modules')
+            parser_add_newmodule.add_argument('-A', '--author-name',   default=[], action='append', help='author name of new modules')
+            parser_add_newmodule.add_argument('-E', '--author-email',  default=[], action='append', help='author email of new modules')
+            parser_add_newmodule.add_argument('-M', '--maintainer-name',  default=[], action='append', help='maintainer name of new modules')
+            parser_add_newmodule.add_argument('-N', '--maintainer-email',  default=[], action='append', help='maintainer email of new modules')
+            parser_add_newmodule.add_argument('-Y', '--create-year', default=[], action='append', help='Year in LICENSE')
+            parser_add_newmodule.add_argument('module_name', nargs='+', help='new module names')
+            parser_add_newmodule.set_defaults(handler=self.setup_newmodule)
+
             
             parser_add_clean = sbprsrs.add_parser('clean', help='clean-up')
 
@@ -845,8 +896,8 @@ class PyEncase(object):
                              prefix_cmd=( args.prefix if (hasattr(args, 'prefix') and
                                                           args.prefix  is not None) else self.prefix))
 
-        if hasattr(args, 'git') and (args.git is not None):
-            self.set_git_path(git_cmd=args.git)
+        if hasattr(args, 'git_command') and (args.git_command is not None):
+            self.set_git_path(git_cmd=args.git_command)
 
         flg_verbose = args.verbose if hasattr(args, 'verbose') else self.verbose
         flg_dry_run = args.dry_run if hasattr(args, 'dry_run') else False
@@ -935,6 +986,376 @@ class PyEncase(object):
 
         if len(modules)>0:
             self.run_pip(subcmd='install', args=modules, verbose=flg_verbose, dry_run=flg_dry_run)
+
+
+    def setup_newmodule(self, args:argparse.Namespace, rest:list=[]):
+
+        subcmd      = args.subcommand if hasattr(args, 'subcommand') else 'unknown'
+
+        self.set_python_path(python_cmd=(args.python if (hasattr(args, 'python') and
+                                                         args.python is not None) else self.python_select),
+                             pip_cmd=(args.pip if (hasattr(args, 'pip') and
+                                                   args.pip is not None) else str(self.pip_use)),
+                             prefix_cmd=( args.prefix if (hasattr(args, 'prefix') and
+                                                          args.prefix  is not None) else self.prefix))
+
+
+        module_src_top = self.srcdir
+
+        if hasattr(args, 'git_command') and (args.git is not None):
+            self.set_git_path(git_cmd=args.git_command)
+
+        verbose = args.verbose if hasattr(args, 'verbose') else self.verbose
+        dry_run = args.dry_run if hasattr(args, 'dry_run') else False
+
+        flg_readme = args.readme if hasattr(args, 'readme') else True
+        flg_git    = args.git    if hasattr(args, 'git')    else True
+
+        flg_set_shebang = args.set_shebang if hasattr(args, 'set_shebang') else False
+
+        newmodule_shebang = self.python_shebang if flg_set_shebang else self.__class__.SHEBANG_DEFAULT
+
+        git_user    = args.git_user               if hasattr(args, 'git_user')         else None
+        git_email   = args.git_email              if hasattr(args, 'git_email')        else None
+
+        git_protocol = args.git_protocol          if hasattr(args, 'git_protocol')     else 'ssh'
+
+        git_url     = args.git_remote_url         if hasattr(args, 'git_remote_url')   else None
+        git_origin  = (not args.git_set_upstream) if hasattr(args, 'git_set_upstream') else True
+
+
+        module_website = args.module_website      if hasattr(args, 'module_website')   else []
+        git_hosting = args.git_hosting            if hasattr(args, 'git_hosting')      else None
+        git_account = args.gitxxb_account         if hasattr(args, 'gitxxb_account')   else None
+
+        title       = args.title       if hasattr(args, 'title')       else ""
+        description = args.title       if hasattr(args, 'description') else ""
+
+        clsnames     = args.class_name  if hasattr(args, 'class_name')  else []
+        req_modules  = args.module      if hasattr(args, 'module')      else []
+
+        module_keywords = args.keywords     if hasattr(args, 'keywords')     else []
+        classifiers     = args.classifiers  if hasattr(args, 'classifiers')  else []
+        author_name     = args.author_name  if hasattr(args, 'author_name')  else []
+        author_email    = args.author_email if hasattr(args, 'author_email') else []
+        maintainer_name  = args.maintainer_name  if hasattr(args, 'maintainer_name')  else []
+        maintainer_email = args.maintainer_email if hasattr(args, 'maintainer_email') else []
+        create_year     = args.create_year  if hasattr(args, 'create_year')  else [ datetime.date.today().year ]
+
+
+        if len(author_name)==0:
+            author_name.append(git_user if isinstance(git_user,str) and git_user else self.__class__.guess_git_username())
+        if len(author_email)==0:
+            author_email.append(git_email if isinstance(git_email,str) and git_email else self.__class__.guess_git_useremail())
+
+
+        author_text_readme    = []
+        author_text_pyproject = []
+        for athr,eml in itertools.zip_longest(author_name, author_email):
+            if athr is None or (not athr):
+                break
+            author_text_readme.append("  %s" % (athr, )
+                                      if eml is None or (not eml) 
+                                      else "  %s(%s)\n" % (athr, eml))
+            author_text_pyproject.append("{name = %s, email= %s}\n" 
+                                         % (repr(athr), repr(eml) if eml is not None else repr("")))
+
+        maintainer_text_pyproject = []
+        for athr,eml in itertools.zip_longest(maintainer_name, maintainer_email):
+            if athr is None or (not athr):
+                break
+            maintainer_text_readme.append("  %s" % (athr, )
+                                          if eml is None or (not eml) 
+                                          else "  %s(%s)\n" % (athr, eml))
+            maintainer_text_pyproject.append("{name = %s, email= %s}\n" 
+                                             % (repr(athr), repr(eml) if eml is not None else repr("")))
+
+
+        author_text_readme    = "\n".join(author_text_readme)
+        author_text_pyproject = ", ".join(author_text_pyproject)
+        author_text_pyproject.rstrip(os.linesep)
+
+        maintainer_text_pyproject = []
+        if len(maintainer_text_pyproject)>0:
+            maintainer_text_pyproject = ", ".join(maintainer_text_pyproject)
+        else:
+            maintainer_text_pyproject = author_text_pyproject
+
+        maintainer_text_pyproject.rstrip(os.linesep)
+
+        if git_user is None or (not git_user):
+            git_user  = author_name[0]
+        if git_email is None or (not git_email):
+            git_email = author_email[0]
+
+        for nmidx,new_module_name in enumerate(args.module_name):
+            bare_name = pathlib.Path(new_module_name).name.removesuffix('.py')
+            module_name       = bare_name.replace('_','-')
+            module_short_path = bare_name.replace('-','_')
+
+            desc_text = "%s : %s" % (title if title else module_name, 
+                                     description if description else '')
+
+            if git_url is None and git_hosting and git_account:
+                if git_hosting == 'github':
+                    if git_protocol == 'https':
+                        git_url_nm = 'https://github.com/%s/%s.git' % (git_account, module_name)
+                    else:
+                        git_url_nm = 'git@github.com:%s/%s.git' % (git_account, module_name)
+                elif git_hosting == 'gitlab':
+                    if git_protocol == 'https':
+                        git_url_nm = 'https://gitlab.com/%s/%s.git' % (git_account, module_name)
+                    else:
+                        git_url_nm = 'git@gitlab.com:%s/%s.git' % (git_account, module_name)
+                else:
+                    if git_protocol == 'https':
+                        git_url_nm = 'https://%s/%s/%s.git' % (git_hosting.removeprefix("https://"), git_account, module_name)
+                    else:
+                        git_url_nm = '%s:%s/%s.git' % (git_hosting.removeprefix("https://"), git_account, module_name)
+            elif git_url:
+                git_url_nm = git_url
+            else:
+                git_url_nm = None
+
+            if len(args.module_name)==1 and len(module_website)>0:
+                url = ",".join(module_website)
+            else:
+                url = ( module_website[nmidx] if nmidx<len(module_website)
+                        else (git_url_nm if git_url_nm else 'https://gitxxx.com/%s/%s'
+                              % ( git_account if git_account
+                                  else "-".join([str(s).lower() 
+                                                 for s in author_name[0].split(" ")]), module_name)))
+                
+            clsnm = clsnames[nmidx] if nmidx<len(clsnames) else ("".join([ i.capitalize() for i in module_name.split("-")]))
+
+            str_format = {}
+            str_format.update(self.__class__.FILENAME_DEFAULT)
+            str_format.update({
+                '____AUTHOR_EMAIL____' : ", ".join(author_email),
+                '____AUTHOR_NAME____' : ", ".join(author_name),
+                '____GIT_DUMMYFILE____' : self.__class__.FILENAME_DEFAULT['____GIT_DUMMYFILE____'],
+                '____MODULE_AUTHOR_LIST____' : author_text_pyproject,
+                '____MODULE_AUTHOR_LIST_TEXT____' : author_text_readme,
+                '____MODULE_CLASSIFIER_LIST____' : ",".join([str(c) for c in classifiers]),
+                '____MODULE_CLS_NAME____' : clsnm,
+                '____MODULE_CREATE_YEAR____' : ", ".join([str(y) for y in create_year]),
+                '____MODULE_DESC____' : desc_text,
+                '____MODULE_DESC_QUOTE____' : repr(desc_text),
+                '____MODULE_HOMEPAGE_URL_QUOTE____' : repr(url),
+                '____MODULE_KEYWORDS____' : ",".join([repr(c) for c in module_keywords]),
+                '____MODULE_MAINTAINERS_LIST____' : maintainer_text_pyproject,
+                '____MODULE_NAME____' : module_name,
+                '____MODULE_REQUIREMENTS____' : ", ".join([repr(c) for c in req_modules]),
+                '____MODULE_SHORT_PATH____' : module_short_path,
+                '____py_shebang_pattern____' : newmodule_shebang,
+                '____README_NAME____' : self.__class__.FILENAME_DEFAULT.get('____README_NAME____', 'README.md'),
+                '____TITLE____':              title,
+            })
+
+            new_module_top = os.path.join(module_src_top, module_name)
+            new_module_test_dir = os.path.join(new_module_top, 'test')
+
+            for dd in [new_module_top, new_module_test_dir,
+                       os.path.join(new_module_top, 'src'),
+                       os.path.join(new_module_top, 'src', module_short_path)]:
+                if verbose or dry_run:
+                    sys.stderr.write("[%s.%s:%d] mkdir -p : '%s'\n" %
+                                     (self.__class__.__name__, 
+                                      inspect.currentframe().f_code.co_name,
+                                      inspect.currentframe().f_lineno, dd))
+                if not dry_run:
+                    os.makedirs(dd, mode=0o755, exist_ok=True)
+
+            text_filter = self.__class__.EmbeddedText.FormatFilter(format_variables=str_format)
+            code_filter = self.__class__.PyCodeFilter(newmodule_shebang, keyword_table=str_format)
+
+            if flg_git:
+                # put gitdummy file in test directory
+                dp = os.path.join(new_module_test_dir, 
+                                  self.__class__.FILENAME_DEFAULT['____GIT_DUMMYFILE____'])
+                if os.path.exists(dp):
+                    if verbose:
+                        sys.stderr.write("[%s.%s:%d] Warning File exists : skip : '%s'\n" %
+                                         (self.__class__.__name__, 
+                                          inspect.currentframe().f_code.co_name,
+                                          inspect.currentframe().f_lineno, dp))
+                else:
+                    if verbose or dry_run:
+                        sys.stderr.write("[%s.%s:%d] put %s in '%s'\n" %
+                                         (self.__class__.__name__, 
+                                          inspect.currentframe().f_code.co_name,
+                                          inspect.currentframe().f_lineno,
+                                          self.__class__.FILENAME_DEFAULT['____GIT_DUMMYFILE____'], new_module_test_dir))
+
+                    if not dry_run:
+                        pathlib.Path(dp).touch(mode=0o644, exist_ok=True)
+
+                new_module_gitignore = os.path.join(new_module_top, '.gitignore')
+
+                if os.path.exists(new_module_gitignore):
+                    if verbose:
+                        sys.stderr.write("[%s.%s:%d] Warning File exists : skip : '%s'\n" %
+                                         (self.__class__.__name__, 
+                                          inspect.currentframe().f_code.co_name,
+                                          inspect.currentframe().f_lineno, new_module_gitignore))
+                else:
+                    if verbose or dry_run:
+                        sys.stderr.write("[%s.%s:%d] .gitignore : '%s'\n" %
+                                         (self.__class__.__name__, 
+                                          inspect.currentframe().f_code.co_name,
+                                          inspect.currentframe().f_lineno, new_module_gitignore))
+                    if not dry_run:
+                        self.__class__.EmbeddedText.extract_to_file(outfile=new_module_gitignore, infile=None,
+                                                                    s_marker=r'\s*#{5,}\s*____MODULE_DOT_GITIGNORE_TEMPLATE_START____\s*#{5,}',
+                                                                    e_marker=r'\s*#{5,}\s*____MODULE_DOT_GITIGNORE_TEMPLATE_END____\s*#{5,}',
+                                                                    include_markers=False, multi_match=False,dedent=True, 
+                                                                    skip_head_emptyline=True, skip_tail_emptyline=True,
+                                                                    dequote=True, format_filter=text_filter, 
+                                                                    open_mode='w', encoding=self.encoding)
+                        os.chmod(new_module_gitignore, mode=0o644)
+
+
+
+                dot_git_path = os.path.join(new_module_top, '.git')
+                if os.path.exists(dot_git_path):
+                    if verbose:
+                        sys.stderr.write("[%s.%s:%d] : Directory already exists: '%s'\n" %
+                                         (self.__class__.__name__, 
+                                          inspect.currentframe().f_code.co_name,
+                                          inspect.currentframe().f_lineno, dot_git_path))
+                else:
+                    git_commands = []
+                    git_commands.append([self.git_path, 'init', new_module_top])
+
+                if isinstance(git_user, str) and git_user:
+                    git_commands.append([self.git_path, 'config',
+                                         '--file', os.path.join(dot_git_path, 'config'),
+                                         'user.name', git_user])
+                elif not self.check_git_config_value(key='user.name', mode='--global'):
+                    git_commands.append([self.git_path, 'config',
+                                         '--file', os.path.join(dot_git_path, 'config'),
+                                         'user.name', getpass.getuser()])
+
+                if isinstance(git_email, str) and git_email:
+                    git_commands.append([self.git_path, 'config',
+                                         '--file', os.path.join(dot_git_path, 'config'),
+                                         'user.email', git_email])
+                elif not self.check_git_config_value(key='user.email', mode='--global'):
+                    git_commands.append([self.git_path, 'config',
+                                         '--file', os.path.join(dot_git_path, 'config'),
+                                         'user.email', getpass.getuser()+'@'+socket.gethostname()])
+            
+                if git_origin:
+                    if isinstance(git_url, str) and git_url:
+                        git_commands.append([self.git_path, 
+                                             '--git-dir', dot_git_path, '--work-tree', new_module_top, 
+                                             'remote', 'add', ('origin' if origin else 'upstream'), git_url])
+                        git_commands.append([self.git_path, 'config',
+                                             '--file', os.path.join(dot_git_path, 'config'),
+                                             'push.default', current])
+
+                for _gitcmd in git_commands:
+                    if verbose or dry_run:
+                        sys.stderr.write("[%s.%s:%d] : Exec : '%s'\n" %
+                                         (self.__class__.__name__, 
+                                          inspect.currentframe().f_code.co_name,
+                                          inspect.currentframe().f_lineno, " ".join(_gitcmd)))
+                    if not dry_run:
+                        gitcmdio = subprocess.run(_gitcmd, encoding=self.encoding, 
+                                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                        if verbose:
+                            sys.stdout.write("[%s.%s:%d] git output : '%s'\n" %
+                                             (self.__class__.__name__, 
+                                              inspect.currentframe().f_code.co_name,
+                                              inspect.currentframe().f_lineno, gitcmdio.stdout))
+                        sys.stderr.write("[%s.%s:%d] git stderr : '%s'\n" %
+                                         (self.__class__.__name__, 
+                                          inspect.currentframe().f_code.co_name,
+                                          inspect.currentframe().f_lineno, gitcmdio.stderr))
+
+
+            if flg_readme:
+                new_module_readme = os.path.join(new_module_top, str_format.get('____README_NAME____', 'README.md'))
+                
+                if os.path.exists(new_module_readme):
+                    if verbose:
+                        sys.stderr.write("[%s.%s:%d] Warning File exists : skip : '%s'\n" %
+                                         (self.__class__.__name__, 
+                                          inspect.currentframe().f_code.co_name,
+                                          inspect.currentframe().f_lineno, new_module_readme))
+                else:
+                    if verbose or dry_run:
+                        sys.stderr.write("[%s.%s:%d] making README file : '%s'\n" %
+                                         (self.__class__.__name__, 
+                                          inspect.currentframe().f_code.co_name,
+                                          inspect.currentframe().f_lineno, new_module_readme))
+                    if not dry_run:
+                        self.__class__.EmbeddedText.extract_to_file(outfile=new_module_readme, infile=None,
+                                                                    s_marker=r'\s*#{5,}\s*____MODULE_README_MD_TEMPLATE_START____\s*#{5,}',
+                                                                    e_marker=r'\s*#{5,}\s*____MODULE_README_MD_TEMPLATE_END____\s*#{5,}',
+                                                                    include_markers=False, multi_match=False,dedent=True, 
+                                                                    skip_head_emptyline=True, skip_tail_emptyline=True,
+                                                                    dequote=True, format_filter=text_filter, 
+                                                                    open_mode='w', encoding=self.encoding)
+                        os.chmod(new_module_readme, mode=0o644)
+
+
+            text_path_templates = [('LICENSE',        'BSD_3_CLAUSE_LICENSE'), 
+                                   ('Makefile',       'MODULE_DIR_MAKEFILE'), 
+                                   ('pyproject.toml', 'MODULE_PYPROJECT_TOML')]
+            for fname, markerid in text_path_templates:
+                lpath = os.path.join(new_module_top, fname)
+                if os.path.exists(lpath):
+                    if verbose:
+                        sys.stderr.write("[%s.%s:%d] Warning File exists : skip : '%s'\n" %
+                                         (self.__class__.__name__, 
+                                          inspect.currentframe().f_code.co_name,
+                                          inspect.currentframe().f_lineno, lpath))
+                    continue
+
+                if verbose or dry_run:
+                    sys.stderr.write("[%s.%s:%d] making %s file : '%s'\n" %
+                                     (self.__class__.__name__, 
+                                      inspect.currentframe().f_code.co_name,
+                                    inspect.currentframe().f_lineno, fname, lpath))
+                if not dry_run:
+                    self.__class__.EmbeddedText.extract_to_file(outfile=lpath, infile=None,
+                                                                s_marker=r'\s*#{5,}\s*____'+markerid+r'_TEMPLATE_START____\s*#{5,}',
+                                                                e_marker=r'\s*#{5,}\s*____'+markerid+r'_TEMPLATE_END____\s*#{5,}',
+                                                                include_markers=False, multi_match=False,dedent=True, 
+                                                                skip_head_emptyline=True, skip_tail_emptyline=True,
+                                                                dequote=True, format_filter=text_filter, 
+                                                                open_mode='w', encoding=self.encoding)
+                    os.chmod(lpath, mode=0o644)
+
+            code_path_template = [('__init__.py',           'MODULE_SRC_INIT_PY'),
+                                  (module_short_path+'.py' ,'MODULE_SRC_MODULE_NAME_PY')]
+
+            for fname, markerid in code_path_template:
+                lpath = os.path.join(new_module_top, 'src', module_short_path, fname)
+                if os.path.exists(lpath):
+                    if verbose:
+                        sys.stderr.write("[%s.%s:%d] : Warning: File already exists (Skipped) : '%s'\n" %
+                                         (self.__class__.__name__, 
+                                          inspect.currentframe().f_code.co_name,
+                                          inspect.currentframe().f_lineno, lpath))
+                    continue
+
+                if verbose or dry_run:
+                    sys.stderr.write("[%s.%s:%d] : Preparing %s from template : '%s'\n" %
+                                     (self.__class__.__name__, 
+                                      inspect.currentframe().f_code.co_name,
+                                      inspect.currentframe().f_lineno, fname, lpath))
+                
+                if not dry_run:
+                    self.__class__.EmbeddedText.extract_to_file(outfile=lpath, infile=None,
+                                                                s_marker=r'\s*#{5,}\s*____'+markerid+'_TEMPLATE_START____\s*#{5,}',
+                                                                e_marker=r'\s*#{5,}\s*____'+markerid+'_TEMPLATE_END____\s*#{5,}',
+                                                                include_markers=False, multi_match=False,dedent=True, 
+                                                                skip_head_emptyline=True, skip_tail_emptyline=True,
+                                                                dequote=False, format_filter=code_filter, 
+                                                                open_mode='w', encoding=self.encoding)
+                    os.chmod(lpath, mode=0o644)
 
     def update_readme(self, keywords={}, bin_basenames=[], lib_basenames=[],
                       flg_git=False, backup=False, verbose=False, dry_run=False):
@@ -2323,3 +2744,287 @@ if __name__=='__main__':
             help(intrinsic_formatter)
                     
         ########## ____INTRINSIC_FORMATTER_TEMPLATE_END____ ##########
+
+        #
+        # Template data for module 
+        #
+
+        ########## ____BSD_3_CLAUSE_LICENSE_TEMPLATE_START____ ##########
+        """
+        BSD 3-Clause License
+        
+        Copyright (c) 2025, {____AUTHOR_NAME____}
+        All rights reserved.
+        
+        Redistribution and use in source and binary forms, with or without
+        modification, are permitted provided that the following conditions are met:
+        
+        1. Redistributions of source code must retain the above copyright notice, this
+           list of conditions and the following disclaimer.
+        
+        2. Redistributions in binary form must reproduce the above copyright notice,
+           this list of conditions and the following disclaimer in the documentation
+           and/or other materials provided with the distribution.
+        
+        3. Neither the name of the copyright holder nor the names of its
+           contributors may be used to endorse or promote products derived from
+           this software without specific prior written permission.
+        
+        THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+        AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+        IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+        DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+        FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+        DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+        SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+        CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+        OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+        OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+        """
+        ########## ____BSD_3_CLAUSE_LICENSE_TEMPLATE_END____ ##########
+
+
+        ########## ____MODULE_DIR_MAKEFILE_TEMPLATE_START____ ##########
+        """
+        PYTHON ?= python3
+        PIP    ?= pip3
+        
+        MAKEFILE_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
+
+        MODULE_NAME  ?= {____MODULE_NAME____}
+        MODULE_SPATH ?= $(subst -,_,$(MODULE_NAME))
+        
+        PYTMPDIR ?= $(MAKEFILE_DIR)/var/lib/python
+        
+        REQUIERD_MODULES = build twine
+        
+        TWINE ?= $(PYTMPDIR)/bin/twine
+        BUILD ?= $(PYTMPDIR)/build
+        TOML ?= $(PYTMPDIR)/toml
+        
+        MOD_TEST_DIR_SRC  ?= $(MAKEFILE_DIR)/var/tmp/test_src
+        MOD_TEST_DIR_DIST ?= $(MAKEFILE_DIR)/var/tmp/test_dist
+        
+        MOD_DEPENDENCIES := $(shell env PYTHONPATH=$(PYTMPDIR):$(PYTHONPATH) $(PYTHON) -c "import sys,toml;[sys.stdout.write(i) for i in toml.load('pyproject.toml').get('project')['dependencies']]")
+        
+        MOD_VERSION := $(shell env PYTHONPATH=$(PYTMPDIR):$(PYTHONPATH) $(PYTHON) -c "import sys,toml;sys.stdout.write(toml.load('pyproject.toml').get('project')['version'])")
+        
+        MOD_TEST_OPT = -h
+        
+        .PHONY: info clean sdist test_src test_dist test_upload upload clean distclean
+        
+        info:
+        	@echo 'Module name         : '$(MODULE_NAME)
+        	@echo 'Module short path   : '$(MODULE_SPATH)
+        	@echo 'Module VERSION      : '$(MOD_VERSION)
+        	@echo 'Module dependencies : '$(MOD_DEPENDENCIES)
+        
+        $(TWINE): 
+        	env PYTHONPATH=$(PYTMPDIR):$(PYTHONPATH) $(PIP) install --target $(PYTMPDIR) $(notdir $@)
+        
+        $(BUILD): 
+        	env PYTHONPATH=$(PYTMPDIR):$(PYTHONPATH) $(PIP) install --target $(PYTMPDIR) $(notdir $@)
+        
+        $(TOML):
+        	env PYTHONPATH=$(PYTMPDIR):$(PYTHONPATH) $(PIP) install --target $(PYTMPDIR) $(notdir $@)
+        
+        sdist:
+        	env PYTHONPATH=$(PYTMPDIR):$(PYTHONPATH) $(PYTHON) -m build 
+        
+        test_src: $(MOD_TEST_DIR_SRC)
+        	-env PYTHONPATH=$(MOD_TEST_DIR_SRC):$(PYTHONPATH) $(PIP) install --target $(MOD_TEST_DIR_SRC) $(notdir $(MOD_DEPENDENCIES))
+        	env PYTHONPATH=$(MOD_TEST_DIR_SRC):$(PYTHONPATH) $(PIP) install --target $(MOD_TEST_DIR_SRC) $(MAKEFILE_DIR)
+        	env PYTHONPATH=$(MOD_TEST_DIR_SRC):$(PYTHONPATH) $(MOD_TEST_DIR_SRC)/bin/$(MODULE_NAME) $(MOD_TEST_OPT)
+        
+        test_dist: $(MOD_TEST_DIR_DIST) $(MAKEFILE_DIR)/dist/$(MODULE_SPATH)-$(MOD_VERSION).tar.gz
+        	-env PYTHONPATH=$(MOD_TEST_DIR_DIST):$(PYTHONPATH) $(PIP) install --target $(MOD_TEST_DIR_DIST) $(notdir $(MOD_DEPENDENCIES))
+        	env PYTHONPATH=$(MOD_TEST_DIR_DIST):$(PYTHONPATH) $(PIP) install --target $(MOD_TEST_DIR_DIST) $(MAKEFILE_DIR)/dist/$(MODULE_SPATH)-$(MOD_VERSION).tar.gz
+        	env PYTHONPATH=$(MOD_TEST_DIR_DIST):$(PYTHONPATH) $(MOD_TEST_DIR_DIST)/bin/$(MODULE_NAME) $(MOD_TEST_OPT)
+        
+        $(MAKEFILE_DIR)/dist/$(MODULE_SPATH)-$(MOD_VERSION).tar.gz: sdist
+        
+        $(MOD_TEST_DIR_SRC):
+        	mkdir -p $(MOD_TEST_DIR_SRC)
+        
+        $(MOD_TEST_DIR_DIST):
+        	mkdir -p $(MOD_TEST_DIR_DIST)
+        
+        test_upload: $(TWINE) sdist
+        	env PYTHONPATH=$(PYTMPDIR):$(PYTHONPATH) $(TWINE) upload --verbose --repository pypitest $(MAKEFILE_DIR)/dist/*
+        
+        upload: $(TWINE) sdist
+        	env PYTHONPATH=$(PYTMPDIR):$(PYTHONPATH) $(TWINE) upload --verbose $(MAKEFILE_DIR)/dist/*
+        
+        clean: 
+        	rm -rf $(MAKEFILE_DIR)/src/$(MODULE_SPATH)/*~ \
+                       $(MAKEFILE_DIR)/src/$(MODULE_SPATH)/__pycache__ \
+                       $(MAKEFILE_DIR)/src/$(MODULE_SPATH)/share/data/*~ \
+                       $(MAKEFILE_DIR)/dist/* \
+                       $(MAKEFILE_DIR)/build/* \
+                       $(MAKEFILE_DIR)/var/lib/python/* \
+                       $(MAKEFILE_DIR)/*~  \
+                       $(MAKEFILE_DIR)/test/*~ 
+        
+        distclean: clean
+        	rm -rf $(MAKEFILE_DIR)/$(MODULE_SPATH).egg-info \
+                       $(MAKEFILE_DIR)/dist \
+                       $(MAKEFILE_DIR)/build \
+                       $(MAKEFILE_DIR)/lib \
+                       $(MAKEFILE_DIR)/var
+        """
+        ########## ____MODULE_DIR_MAKEFILE_TEMPLATE_END____ ##########
+
+        ########## ____MODULE_PYPROJECT_TOML_TEMPLATE_START____ ##########
+        '''
+        [build-system]
+        requires = ["hatchling"]
+        build-backend = "hatchling.build"
+        
+        [project]
+        name = "{____MODULE_NAME____}"
+        version = "0.0.1"
+        description = {____MODULE_DESC_QUOTE____}
+        dependencies = [{____MODULE_REQUIREMENTS____}]
+        readme = "{____README_NAME____}"
+        #requires-python = ">=3.9"
+        
+        license = {{ file = "LICENSE" }}
+        #license-files = ["LICEN[CS]E*", "vendored/licenses/*.txt", "AUTHORS.md"]
+        
+        keywords = [{____MODULE_KEYWORDS____}]
+        
+        authors = [{____MODULE_AUTHOR_LIST____}]
+                   
+        maintainers = [{____MODULE_MAINTAINERS_LIST____}]
+                   
+        
+        classifiers = [{____MODULE_CLASSIFIER_LIST____}]
+        
+        [project.urls]
+        Homepage = {____MODULE_HOMEPAGE_URL_QUOTE____}
+        
+        [project.scripts]
+        {____MODULE_NAME____} = "{____MODULE_SHORT_PATH____}.{____MODULE_SHORT_PATH____}:main"
+        
+        '''
+        ########## ____MODULE_PYPROJECT_TOML_TEMPLATE_END____ ##########
+
+        ########## ____MODULE_README_MD_TEMPLATE_START____ ##########
+        """
+        # {____MODULE_NAME____}
+        
+        {____MODULE_DESC____}
+        
+        ## Requirement
+        
+        - Python: tested with version 3.X
+        
+        ## Usage
+        
+        - To be written
+        
+        ## Author
+         {____MODULE_AUTHOR_LIST_TEXT____}
+        """
+        ########## ____MODULE_README_MD_TEMPLATE_END____ ##########
+
+        ########## ____MODULE_DOT_GITIGNORE_TEMPLATE_START____ ##########
+        '''
+        # Byte-compiled / optimized / DLL files
+        __pycache__/
+        *.py[codz]
+        *$py.class
+        
+        # C extensions
+        *.so
+        
+        # Distribution / packaging
+        .Python
+        build/
+        develop-eggs/
+        dist/
+        downloads/
+        eggs/
+        .eggs/
+        lib/
+        lib64/
+        parts/
+        sdist/
+        var/
+        wheels/
+        share/python-wheels/
+        *.egg-info/
+        .installed.cfg
+        *.egg
+        MANIFEST
+        
+        # Flask stuff:
+        instance/
+        .webassets-cache
+        
+        # Scrapy stuff:
+        .scrapy
+        
+        # PyBuilder
+        .pybuilder/
+        target/
+        
+        # IPython
+        profile_default/
+        ipython_config.py
+        
+        # PyPI configuration file
+        .pypirc
+        
+        # This module build
+        !{____GIT_DUMMYFILE____}
+        '''
+        ########## ____MODULE_DOT_GITIGNORE_TEMPLATE_END____ ##########
+
+        ########## ____MODULE_SRC_INIT_PY_TEMPLATE_START____ ##########
+        #### ____py_shebang_pattern____ ####
+        # -*- coding: utf-8 -*-
+        
+        from .____MODULE_SHORT_PATH____ import ____MODULE_CLS_NAME____
+        
+        __copyright__    = 'Copyright (c) ____MODULE_CREATE_YEAR____, ____AUTHOR_NAME____'
+        __version__      = ____MODULE_CLS_NAME____.VERSION
+        __license__      = 'BSD-3-Clause'
+        __author__       = '____AUTHOR_NAME____'
+        __author_email__ = '____AUTHOR_EMAIL____'
+        __url__          = ____MODULE_HOMEPAGE_URL_QUOTE____
+        
+        __all__ = ['____MODULE_CLS_NAME____', ]
+        ########## ____MODULE_SRC_INIT_PY_TEMPLATE_END____ ##########
+
+        ########## ____MODULE_SRC_MODULE_NAME_PY_TEMPLATE_START____ ##########
+        #### ____py_shebang_pattern____ ####
+        # -*- coding: utf-8; mode: python; -*-
+        """
+        ____MODULE_DESC____
+        """
+        import json
+                
+        class ____MODULE_CLS_NAME____(object):
+            """
+            ____MODULE_CLS_NAME____
+            ____MODULE_DESC____
+            """
+
+            VERSION = "0.0.1"
+
+            def __init__(self):
+                self.contents = {}  
+                
+            def __repr__(self):
+                return json.dumps(self.contents, ensure_ascii=False, indent=4, sort_keys=True)
+                
+            def __str__(self):
+                return json.dumps(self.contents, ensure_ascii=False, indent=4, sort_keys=True)
+        
+        def main():
+            help(____MODULE_CLS_NAME____)
+                
+        if __name__ == '__main__':
+            main()
+        ########## ____MODULE_SRC_MODULE_NAME_PY_TEMPLATE_END____ ##########
