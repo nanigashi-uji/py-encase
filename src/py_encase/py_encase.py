@@ -20,7 +20,7 @@ import json
 
 class PyEncase(object):
 
-    VERSION          = '0.0.6'
+    VERSION          = '0.0.7'
     PIP_MODULE_NAME  = 'py-encase'
     ENTYTY_FILE_NAME = pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name
     #    ENTYTY_FILE_NAME = pathlib.Path(__file__).resolve().name
@@ -184,8 +184,13 @@ class PyEncase(object):
             sbprsrs = argprsrm.add_subparsers(dest='subcommand')
             
             parser_add_info = sbprsrs.add_parser('info', help='Show information')
-            parser_add_info.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
-            parser_add_info.add_argument('-l', '--long', action='store_true', help='Show all information')
+            parser_add_info.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Show all path information')
+            parser_add_info.add_argument('-l', '--long',    action='store_true', help='Show long description')
+            parser_add_info.add_argument('-s', '--short',   action='store_true', help='Show minimum description')
+            parser_add_info.add_argument('-V', '--version', action='store_true', help='Show version information')
+            parser_add_info.add_argument('-m', '--pip-module-name',    action='store_true', help='Show PyPI module name')
+            parser_add_info.add_argument('-M', '--manage-script-name', action='store_true', help='Show manage script name')
+            parser_add_info.add_argument('-O', '--manage-option',      action='store_true', help='Show CLI option for manage-mode')
             parser_add_info.set_defaults(handler=self.show_info)
 
             parser_add_init = sbprsrs.add_parser('init', help='Initialise Environment')
@@ -555,12 +560,44 @@ class PyEncase(object):
 
     def show_info(self, args:argparse.Namespace, rest:list=[]):
 
-        flg_verbose = args.verbose if hasattr(args, 'verbose') else self.verbose
-        flg_long    = args.long    if hasattr(args, 'long')    else False
+        flg_verbose            = args.verbose            if hasattr(args, 'verbose')            else self.verbose
+        flg_long               = args.long               if hasattr(args, 'long')               else False
+        flg_short              = args.short              if hasattr(args, 'short')              else False
+        flg_version            = args.version            if hasattr(args, 'version')            else False
+        flg_manage_script_name = args.manage_script_name if hasattr(args, 'manage_script_name') else False
+        flg_manage_option      = args.manage_option      if hasattr(args, 'manage_option')      else False
+        flg_pip_module_name    = args.pip_module_name    if hasattr(args, 'pip_module_name')    else False
+
 
         if not(flg_verbose or flg_long):
+            if flg_version:
+                sys.stdout.write("%s%s\n" % ('' if flg_short else 'PIP module version: ', self.__class__.VERSION ))
+            if flg_pip_module_name:
+                sys.stdout.write("%s%s\n" % ('' if flg_short else 'PIP module name:    ', self.__class__.PIP_MODULE_NAME ))
+            if flg_manage_script_name:
+                sys.stdout.write("%s%s\n" % ('' if flg_short else 'Manage script name: ', self.__class__.MNG_SCRIPT))
+            if flg_manage_option:
+                sys.stdout.write("%s%s\n" % ('' if flg_short else 'Manage mode option: ', self.__class__.MNG_OPT))
+            if ( flg_version or flg_pip_module_name
+                 or flg_manage_script_name  or flg_manage_option):
+                return 
+
             print(self.description())
             return
+
+        if flg_long:
+            print(self.description())
+            print('PIP module name:    ', self.__class__.PIP_MODULE_NAME )
+            print('PIP module version: ', self.__class__.VERSION )
+            print('Manage script name: ', self.__class__.MNG_SCRIPT)
+            print('Manage mode option: ', self.__class__.MNG_OPT)
+            return
+
+
+
+
+
+
 
         print("Description            : ", self.description())
         print("Python command         : ", str(self.python_use))
