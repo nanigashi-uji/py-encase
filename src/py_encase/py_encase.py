@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8; mode: python; -*-
 
 import sys
 import os
@@ -16,15 +17,19 @@ import io
 import itertools
 import getpass
 import socket
+import collections
+import urllib.parse
 import json
+import glob
+import importlib.metadata
+import keyword
 
 class PyEncase(object):
 
-    VERSION          = '0.0.7'
+    VERSION          = '0.0.8'
     PIP_MODULE_NAME  = 'py-encase'
     ENTYTY_FILE_NAME = pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name
     #    ENTYTY_FILE_NAME = pathlib.Path(__file__).resolve().name
-
 
     MNG_SCRIPT = 'mng_encase'
     MNG_OPT    = '--manage'
@@ -50,12 +55,92 @@ class PyEncase(object):
                          '____README_NAME____':   'README.md',
                         }
 
+    NON_ASCII_PATTERN       = re.compile('[^0-9A-Za-z]+')
+
     SHEBANG_DEFAULT = '#!/usr/bin/env python3'
 
+    GIT_REMOTE_DEFAULT = { 'LOCATION'      : os.path.join('~', 'git_repositories'),
+                           'REMOTE_GITCMD' : 'git',
+                           'SSH_COMMAND'   : 'ssh',
+                           'REMOTE_ALIAS'  : 'origin'}
+
+    class StreamExtd(object):
+        """
+        Extended Stream Interface
+        """
+        class StreamIF(object):
+            """
+            Wrapper for stdout/stderr to show with full qualified function name
+            """
+            def __init__(self, stream=sys.stderr):
+                self.stream      = stream
+                
+            def write(self, text='', *args, clsname=None, more_upper=False):
+                refname,lineno = self.ana_caller_fqn(clsname=clsname, more_upper=more_upper)
+                tmplt = "[%%s:%%d] %s\n" % (text, )
+                return self.stream.write(tmplt % ((refname, lineno)
+                                                  + (args if isinstance(args, tuple) else (args,) )))
+        
+            def ana_caller_fqn(self, clsname=None, more_upper=False):
+                try:
+                    if more_upper:
+                        frm = inspect.currentframe().f_back.f_back.f_back
+                    else:
+                        frm = inspect.currentframe().f_back.f_back
+        
+                    mod_name = frm.f_globals.get('__name__', '')
+                    code = frm.f_code
+        
+                    if sys.version_info >= (3, 11):
+                        qualname = code.co_qualname
+                    else:
+                        if clsname:
+                            qualname = clsname + '.' + code.co_name
+                        else:
+                            prntobj = frm.f_locals.get('self') or frm.f_locals.get('cls')
+                            if prntobj:
+                                qualname = type(prntobj).__name__ + '.' + code.co_name
+                            else:
+                                qualname = code.co_name
+        
+                    fqn_name = (mod_name+'.'+qualname) if ( mod_name and mod_name != '__main__' ) else qualname
+                    return (fqn_name, frm.f_lineno)
+        
+                finally:
+                    del frm
+    
+    
+        def __init__(self,
+                     stdin=sys.stdin,
+                     stderr=sys.stdout,
+                     stdout=sys.stderr):
+    
+            self.streams = collections.namedtuple('streams',
+                                                  ['stdin',
+                                                   'stdout',
+                                                   'stderr'])(stdin=self.__class__.StreamIF(sys.stdin),
+                                                              stderr=self.__class__.StreamIF(sys.stdout),
+                                                              stdout=self.__class__.StreamIF(sys.stderr))
+        @property
+        def stdin(self):
+            return self.streams.stdin
+    
+        @property
+        def stdout(self):
+            return self.streams.stdout
+    
+        @property
+        def stderr(self):
+            return self.streams.stderr
+    
     def __init__(self, argv:list=sys.argv, 
                  python_cmd:str=None, pip_cmd:str=None, 
                  prefix_cmd:str=None, git_cmd:str=None, 
                  verbose:bool=False, dry_run:bool=False, encoding='utf-8'):
+
+        self.streams = self.__class__.StreamExtd(stdin=sys.stdin,
+                                                 stderr=sys.stdout,
+                                                 stdout=sys.stderr)
 
         self.argv         = argv
         self.path_invoked = pathlib.Path(self.argv[0])
@@ -76,6 +161,19 @@ class PyEncase(object):
                                                              'description' : 'Module for intrinsic data formater',
                                                              'depends'     : [],
                                                              'pip_module'  : ['PyYAML']}
+
+    @property
+    def stdin(self):
+        return self.streams.stdin
+
+    @property
+    def stdout(self):
+        return self.streams.stdout
+    
+    @property
+    def stderr(self):
+        return self.streams.stderr
+
 
     def set_python_path(self, python_cmd=None, pip_cmd=None, prefix_cmd=None):
         self.python_select = (python_cmd if isinstance(python_cmd,str) and python_cmd
@@ -193,6 +291,15 @@ class PyEncase(object):
             parser_add_info.add_argument('-O', '--manage-option',      action='store_true', help='Show CLI option for manage-mode')
             parser_add_info.set_defaults(handler=self.show_info)
 
+
+            parser_add_contents = sbprsrs.add_parser('contents', help='Show file list')
+            parser_add_contents.add_argument('-v', '--verbose',     action='store_true', default=self.verbose, help='Show all path information')
+            parser_add_contents.add_argument('-a', '--all',         action='store_true', help='Show all list')
+            parser_add_contents.add_argument('-b', '--bin-script',  action='store_true', help='Show bin scripts')
+            parser_add_contents.add_argument('-l', '--lib-script',  action='store_true', help='Show lib scripts')
+            parser_add_contents.add_argument('-m', '--modules-src', action='store_true', help='Show module sources')
+            parser_add_contents.set_defaults(handler=self.show_contents)
+
             parser_add_init = sbprsrs.add_parser('init', help='Initialise Environment')
             parser_add_init.add_argument('-P', '--python', default=None, help='Python path / command')
             parser_add_init.add_argument('-I', '--pip',  default=None, help='PIP path / command')
@@ -208,12 +315,10 @@ class PyEncase(object):
 
             parser_add_init.add_argument('-M', '--move', action='store_true', help='moving this script body into instead of copying')
             parser_add_init.add_argument('-g', '--git',  action='store_true', help='setup files for git')
-            parser_add_init.add_argument('-e', '--git-email',  type=str, help='git user e-mail address')
-            parser_add_init.add_argument('-u', '--git-user',   type=str, help='git user name ')
-            parser_add_init.add_argument('-U', '--git-remote-url', type=str, help='git remote URL')
 
-            parser_add_init.add_argument('-y', '--git-set-upstream', action='store_true', default=False, help='git set upstream')
-
+            self.__class__.GitIF.add_remoteif_arguments(arg_parser=parser_add_init)
+            #self.__class__.GitIF.add_invokeoptions_arguments(arg_parser=parser_add_init)
+            
             parser_add_init.add_argument('-r', '--readme', action='store_true', help='setup/update README.md')
             parser_add_init.add_argument('-t', '--title',  help='Project title')
             parser_add_init.add_argument('-m', '--module', default=[], action='append', help='install module by pip')
@@ -267,8 +372,6 @@ class PyEncase(object):
             parser_add_addlib.add_argument('script_lib', nargs='+', help='all files')
             parser_add_addlib.set_defaults(handler=self.manage_env)
 
-
-
             parser_add_newmodule = sbprsrs.add_parser('newmodule', help='add new module source')
             parser_add_newmodule.add_argument('-P', '--python', default=None, help='Python path / command')
             parser_add_newmodule.add_argument('-I', '--pip',  default=None, help='PIP path / command')
@@ -283,23 +386,15 @@ class PyEncase(object):
 
             parser_add_newmodule.add_argument('-S', '--set-shebang', action='store_true', help='Set shebang based on the local environment')
 
-            parser_add_newmodule.add_argument('-R', '--no-readme', action='store_false', dest='readme',
+            parser_add_newmodule.add_argument('-Q', '--no-readme', action='store_false', dest='readme',
                                               default='True', help='NO README.md created')
             parser_add_newmodule.add_argument('-b', '--no-git-file', action='store_false', dest='git',
                                               default='True', help='NO README.md created')
-
-
-            parser_add_newmodule.add_argument('-e', '--git-email',  type=str, help='git user e-mail address')
-            parser_add_newmodule.add_argument('-u', '--git-user',   type=str, help='git user name ')
-            parser_add_newmodule.add_argument('-z', '--git-protocol',   choices=('https', 'ssh'), default='ssh', help='git protocol')
-            parser_add_newmodule.add_argument('-U', '--git-remote-url', type=str, help='git remote URL')
+            
+            self.__class__.GitIF.add_remoteif_arguments(arg_parser=parser_add_newmodule)
+            #self.__class__.GitIF.add_invokeoptions_arguments(arg_parser=parser_add_newmodule)
 
             parser_add_newmodule.add_argument('-W', '--module-website', default=[], action='append', help='New module URL')
-            parser_add_newmodule.add_argument('-H', '--git-hosting',    type=str, help='github or gitlab or URL')
-            parser_add_newmodule.add_argument('-a', '--gitxxb-account', type=str, help='github/gitlab accountname')
-
-            parser_add_newmodule.add_argument('-y', '--git-set-upstream', action='store_true', default=False, help='git set upstream')
-
             parser_add_newmodule.add_argument('-d', '--description',  help='Project description')
             parser_add_newmodule.add_argument('-t', '--title',        help='Project title')
             parser_add_newmodule.add_argument('-C', '--class-name', default=[], action='append', help='Module class name')
@@ -313,8 +408,22 @@ class PyEncase(object):
             parser_add_newmodule.add_argument('-Y', '--create-year', default=[], action='append', help='Year in LICENSE')
             parser_add_newmodule.add_argument('module_name', nargs='+', help='new module names')
             parser_add_newmodule.set_defaults(handler=self.setup_newmodule)
-
             
+            parser_add_updatereadme = sbprsrs.add_parser('update_readme', help='update readme file')
+            parser_add_updatereadme.set_defaults(handler=self.manage_readme)
+            parser_add_updatereadme.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
+            parser_add_updatereadme.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+            parser_add_updatereadme.add_argument('-b', '--backup',  action='store_true', help='Keep backup file')
+            parser_add_updatereadme.add_argument('-t', '--title',   help='Title text')
+
+            parser_add_managegit = sbprsrs.add_parser('init_git', help='Initialise git repository')
+            parser_add_managegit.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
+            parser_add_managegit.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
+            parser_add_managegit.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+            self.__class__.GitIF.add_remoteif_arguments(arg_parser=parser_add_managegit)
+            parser_add_managegit.add_argument('-m', '--module-src', help='Setup git for specified module source')
+            parser_add_managegit.set_defaults(handler=self.manage_git)
+
             parser_add_clean = sbprsrs.add_parser('clean', help='clean-up')
 
             parser_add_clean.set_defaults(handler=self.clean_env)
@@ -409,30 +518,21 @@ class PyEncase(object):
         if self.__class__.version_compare(self.__class__.VERSION, latest_version)<0 or force_install:
             orig_path = self.path_invoked.resolve()
             if orig_path.name != self.__class__.ENTYTY_FILE_NAME:
-                sys.stderr.write("[%s.%s:%d] selfupdate: Current version=='%s', Latest version=='%s', Force install?: %s \n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno,
-                                  self.__class__.VERSION, latest_version, str(force_install)))
+                self.stderr.write("selfupdate: Current version=='%s', Latest version=='%s', Force install?: %s" %
+                                  (self.__class__.VERSION, latest_version, str(force_install)))
                 raise ValueError("Filename is not proper: '"+orig_path.name+"' != '"+self.__class__.ENTYTY_FILE_NAME+"'")
 
             if flg_verbose or dry_run:
-                sys.stderr.write("[%s.%s:%d] selfupdate: Current version=='%s', Latest version=='%s', Force install?: %s \n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno,
-                                  self.__class__.VERSION, latest_version, str(force_install)))
+                self.stderr.write("selfupdate: Current version=='%s', Latest version=='%s', Force install?: %s" %
+                                 (self.__class__.VERSION, latest_version, str(force_install)))
 
             new_version_path = os.path.join(self.python_pip_path,
                                             self.__class__.PIP_MODULE_NAME.replace('-', '_'),
                                             self.__class__.ENTYTY_FILE_NAME)
             
             if not os.path.isfile(new_version_path):
-                sys.stderr.write("[%s.%s:%d] selfupdate: Internal error: file not found: '%s'\n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno,
-                                  self.__class__.VERSION, latest_version, str(force_install)))
+                self.stderr.write("selfupdate: Internal error: file not found: '%s'" %
+                                  (self.__class__.VERSION, latest_version, str(force_install)))
                 raise FileNotFoundError("Is not file: "+new_version_path)
 
             bkup_path = self.__class__.rename_with_mtime_suffix(orig_path,
@@ -441,26 +541,17 @@ class PyEncase(object):
                                                                 verbose=flg_verbose,
                                                                 dry_run=flg_dry_run)
             if flg_verbose or flg_dry_run:
-                sys.stderr.write("[%s.%s:%d] selfupdate: Backup current file: '%s' --> '%s'\n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno, orig_path, bkup_path))
+                self.stderr.write("selfupdate: Backup current file: '%s' --> '%s'" % (orig_path, bkup_path))
                                  
             if flg_verbose or flg_dry_run:
-                sys.stderr.write("[%s.%s:%d] selfupdate: Copy file: '%s' --> '%s'\n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno, new_version_path, orig_path))
+                self.stderr.write("selfupdate: Copy file: '%s' --> '%s'" % (new_version_path, orig_path, ))
             if not flg_dry_run:
                 shutil.copy2(new_version_path, orig_path, follow_symlinks=True)
                 os.chmod(orig_path, mode=0o755, follow_symlinks=True)
         else:
             if flg_verbose:
-                sys.stderr.write("[%s.%s:%d] selfupdate: skip (up-to-date) : Current version=='%s', Latest version=='%s', Force install?: %s \n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno,
-                                  self.__class__.VERSION, latest_version, str(force_install)))
+                self.stderr.write("selfupdate: skip (up-to-date) : Current version=='%s', Latest version=='%s', Force install?: %s" %
+                                  (self.__class__.VERSION, latest_version, str(force_install)))
 
     def run_pip(self, subcmd:str, args=[], verbose=False, dry_run=False, **popen_kwargs):
         
@@ -502,10 +593,7 @@ class PyEncase(object):
         cmdargs.extend(restx)
 
         if verbose or dry_run:
-            sys.stderr.write("[%s.%s:%d] Exec: '%s'\n" %
-                             (self.__class__.__name__, 
-                              inspect.currentframe().f_code.co_name,
-                              inspect.currentframe().f_lineno, (" ".join(cmdargs))))
+            self.stderr.write("Exec: '%s'" % (" ".join(cmdargs),))
         if not dry_run:
             return subprocess.run(cmdargs, shell=False,
                                   encoding=self.encoding, **popen_kwargs)
@@ -523,19 +611,13 @@ class PyEncase(object):
             script_path = os.path.join(self.python_path, script if script.endswith('.py') else script+'.py')
             
             if os.path.isdir(script_path):
-                sys.stderr.write("[%s.%s:%d] Error: '%s' is directory\n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno, script_path))
+                self.stderr.write("Error: '%s' is directory" % (script_path, ))
                 raise IsADirectoryError()
             elif not os.path.isfile(script_path):
 
                 pip_bin_path = os.path.join(self.python_pip_path, 'bin', script.removesuffix('.py') if script.endswith('.py') else script)
                 if not os.path.isfile(pip_bin_path):
-                    sys.stderr.write("[%s.%s:%d] Error: File not found: '%s', '%s'\n" %
-                                     (self.__class__.__name__, 
-                                      inspect.currentframe().f_code.co_name,
-                                      inspect.currentframe().f_lineno, script_path, pip_bin_path))
+                    self.stderr.write("Error: File not found: '%s', '%s'" % (script_path, pip_bin_path))
                     raise FileNotFoundError()
                 else:
                     script_path = pip_bin_path
@@ -543,11 +625,8 @@ class PyEncase(object):
             cmd_args = [self.python_use, script_path ] + args
 
         if self.verbose:
-            sys.stderr.write("[%s.%s:%d] Exec: '%s' with PYTHONPATH='%s'\n" %
-                             (self.__class__.__name__, 
-                              inspect.currentframe().f_code.co_name,
-                              inspect.currentframe().f_lineno, 
-                              "".join(cmd_args), os.environ['PYTHONPATH']))
+            self.stderr.write("Exec: '%s' with PYTHONPATH='%s'" %
+                              ("".join(cmd_args), os.environ['PYTHONPATH']))
         sys.stdout.flush()
         sys.stderr.flush()
         os.execvpe(cmd_args[0], cmd_args, os.environ)
@@ -593,12 +672,6 @@ class PyEncase(object):
             print('Manage mode option: ', self.__class__.MNG_OPT)
             return
 
-
-
-
-
-
-
         print("Description            : ", self.description())
         print("Python command         : ", str(self.python_use))
         print("Python select          : ", self.python_select)
@@ -622,6 +695,76 @@ class PyEncase(object):
         print("PIP log path           : ", self.python_pip_log_path)
         print("Python shebang         : ", self.python_shebang)
 
+    def show_contents(self, args:argparse.Namespace, rest:list=[]):
+        flg_verbose = args.verbose       if hasattr(args, 'verbose')       else self.verbose
+        flg_all     = args.all           if hasattr(args, 'all')           else False
+        flg_bin     = args.bin_script    if hasattr(args, 'bin_script')    else False
+        flg_lib     = args.lib_script    if hasattr(args, 'lib_script')    else False
+        flg_mod     = args.module_src    if hasattr(args, 'module_src')    else False
+        flg_pip     = args.pip_installed if hasattr(args, 'pip_installed') else False
+        
+        if flg_bin or flg_lib or flg_all:
+            bin_scr, lib_scr = self.list_categorized_pkg_scripts()
+            if flg_bin or flg_all:
+                if flg_verbose:
+                    print('Bin Scripts: ----------------------------------------')
+                for scr in bin_scr:
+                    print(scr)
+            if flg_lib or flg_all:
+                if flg_verbose:
+                    print('Lib Scripts: ----------------------------------------')
+                for scr in lib_scr:
+                    print(scr)
+        if flg_mod or flg_all:
+            mod_src = self.list_module_source()
+            if flg_verbose:
+                print('Module source: ----------------------------------------')
+            for src in mod_src:
+                print(src)
+        if flg_pip or flg_all:
+            pip_mod = self.list_pip_modules()
+            l_name    = max([len(n) for n,v,p in pip_mod])
+            l_version = max([len(v) for n,v,p in pip_mod])
+            if flg_verbose:
+                print('Module installed: ----------------------------------------')
+            for name, version, path in pip_mod:
+                print("%-*s : %-*s (%s)" % (l_name, name, l_version, version, path))
+
+    def list_all_pkg_scripts(self):
+        return [os.path.basename(x) for x in 
+                glob.glob(os.path.join(self.python_path, '*.py'))]
+
+    def list_categorized_pkg_scripts(self):
+        buf_bin = []
+        buf_lib = []
+        for x in self.list_all_pkg_scripts():
+            b_path = os.path.join(self.bindir, x.removesuffix('.py'))
+            if ( os.path.exists(b_path) 
+                 and os.path.islink(b_path) ) : 
+                buf_bin.append(x)
+            else:
+                buf_lib.append(x)
+        return (buf_bin, buf_lib)
+
+    def list_pip_modules(self):
+        location = pathlib.Path(self.python_pip_path)
+        buf = []
+        for pttrn in ("*.dist-info", "*.egg-info"):
+            for info_dir in (location.glob(pttrn)):
+                try:
+                    dist = importlib.metadata.PathDistribution(info_dir)
+                    buf.append((dist.metadata.get("Name"), dist.version, dist.locate_file("")))
+                except Exception as e:
+                    print(e)
+                    pass
+        return sorted(buf, key=lambda x: x[0].lower())
+
+    def list_module_source(self):
+        buf = []
+        for x in glob.glob(os.path.join(self.srcdir, '*', 'pyproject.toml')):
+            buf.append(os.path.dirname(x))
+        return buf
+
     def pkg_dir_list(self):
         return [self.prefix, self.bindir, self.vardir, 
                 self.srcdir, self.tmpdir, self.logdir, self.python_path]
@@ -637,10 +780,7 @@ class PyEncase(object):
         # Make directory structure 
         for dd in self.all_dir_list():
             if verbose or dry_run:
-                sys.stderr.write("[%s.%s:%d] mkdir -p : '%s'\n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno, dd))
+                self.stderr.write("mkdir -p : '%s'" % (dd, ))
             if not dry_run:
                 os.makedirs(dd, mode=0o755, exist_ok=True)
         return
@@ -654,26 +794,16 @@ class PyEncase(object):
         if os.path.exists(script_dest):
             if filecmp.cmp(orig_path, script_dest, shallow=False):
                 if verbose:
-                    sys.stderr.write("[%s.%s:%d] Warning : same file already exists: '%s'\n" %
-                                     (self.__class__.__name__, 
-                                      inspect.currentframe().f_code.co_name,
-                                      inspect.currentframe().f_lineno, script_dest))
+                    self.stderr.write("Warning : same file already exists: '%s'" % (script_dest, ))
             else:
-                sys.stderr.write("[%s.%s:%d] Error : (different) file already exists: '%s'\n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno, script_dest))
+                self.stderr.write("Error : (different) file already exists: '%s'" % (script_dest, ))
                 # raise FileExistsError
             return
         else:
             # Copy script into bindir 
             if verbose or dry_run:
-                sys.stderr.write("[%s.%s:%d] %s '%s' '%s' \n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno,
-                                  'mv -i' if flg_move else 'cp -ai',
-                                  orig_path, script_dest))
+                self.stderr.write("%s '%s' '%s' " %
+                                  ('mv -i' if flg_move else 'cp -ai', orig_path, script_dest))
             if not dry_run:
                 if flg_move:
                     try:
@@ -681,11 +811,7 @@ class PyEncase(object):
                     except OSError:
                         shutil.move(orig_path, script_dest)
                     except Exception as e:
-                        sys.stderr.write("[%s.%s:%d] Error: Can not meve : '%s' --> '%s' \n" %
-                                         (self.__class__.__name__, 
-                                          inspect.currentframe().f_code.co_name,
-                                          inspect.currentframe().f_lineno,
-                                          orig_path, script_dest))
+                        self.stderr.write("Error: Can not meve : '%s' --> '%s'" % (orig_path, script_dest))
                         raise(e)
                 else:
                     shutil.copy2(orig_path, script_dest, follow_symlinks=True)
@@ -703,35 +829,22 @@ class PyEncase(object):
 
         if os.path.exists(link_dest):
             if pathlib.Path(link_dest).resolve() == self.path_invoked.absolute():
-                sys.stderr.write("[%s.%s:%d] Symbolic link already exists: '%s' --> '%s' \n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno, link_dest, entiry_name))
+                self.stderr.write("Symbolic link already exists: '%s' --> '%s'" % (link_dest, entiry_name))
             else:
-                sys.stderr.write("[%s.%s:%d] (different) Symbolic link already exists: '%s'\n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno, link_dest))
+                self.stderr.write("(different) Symbolic link already exists: '%s'" % (link_dest, ))
                 #raise FileExistsError
             return
 
         if verbose or dry_run:
-            sys.stderr.write("[%s.%s:%d] make symbolic link : '%s' --> '%s' \n" %
-                             (self.__class__.__name__, 
-                              inspect.currentframe().f_code.co_name,
-                              inspect.currentframe().f_lineno, link_dest, entiry_name))
+            self.stderr.write("make symbolic link : '%s' --> '%s'" % (link_dest, entiry_name))
         if not dry_run:
             os.symlink(entiry_name, link_dest)
-
 
     @classmethod
     def rename_with_mtime_suffix(cls, file_path, add_sufix=None, dest_dir=None, verbose=False, dry_run=False):
         if not os.path.exists(file_path):
             if verbose or dry_run:
-                sys.stderr.write("[%s.%s:%d] File not found : '%s' \n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno, file_path))
+                self.stderr.write("File not found : '%s'" % (file_path, ))
             return None
 
         mtime  = os.path.getmtime(file_path)
@@ -747,28 +860,20 @@ class PyEncase(object):
 
         if not os.path.isdir(dest):
             if verbose or dry_run:
-                sys.stderr.write("[%s.%s:%d] Make directory: '%s'\n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno, dest))
+                cls.StreamExtd().stderr.write("Make directory: '%s'" % (dest, ))
             if not dry_run:
                 os.makedirs(dest, exist_ok=True)
 
         if verbose or dry_run:
-            sys.stderr.write("[%s.%s:%d] Move file: '%s' --> '%s'\n" %
-                             (cls.__name__, 
-                              inspect.currentframe().f_code.co_name,
-                              inspect.currentframe().f_lineno, file_path, new_path))
+            cls.StreamExtd().stderr.write("Move file: '%s' --> '%s'" % (file_path, new_path))
         if not dry_run:
             try:
                 os.rename(file_path, new_path)
             except OSError:
                 shutil.move(file_path, new_path)
             except Exception as e:
-                sys.stderr.write("[%s.%s:%d] Error: Can not rename file '%s' --> '%s': %s\n" %
-                                 (cls.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno, file_path, new_path, str(e)))
+                cls.StreamExtd().stderr.write("Error: Can not rename file '%s' --> '%s': %s" %
+                                  (file_path, new_path, str(e)))
                 return None
 
         return new_path
@@ -782,28 +887,20 @@ class PyEncase(object):
         if ((pdir.is_file() or pdir.is_symlink() )
             and ( not pdir.name.startswith('.'))):
             if verbose or dry_run:
-                sys.stderr.write("[%s.%s:%d] Remove file or symblic-link: '%s'\n" %
-                                 (cls.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno, str(pdir)))
+                cls.StreamExtd().stderr.write("Remove file or symblic-link: '%s'" % (str(pdir), ))
             if not dry_run:
                 try:
                     pdir.unlink()
                 except Exception as e:
-                    sys.stderr.write("[%s.%s:%d] Error: removin file or symblic-link: '%s' : %s\n" %
-                                     (cls.__name__, 
-                                      inspect.currentframe().f_code.co_name,
-                                      inspect.currentframe().f_lineno, str(pdir), str(e)))
+                    cls.StreamExtd().stderr.write("Error: removin file or symblic-link: '%s' : %s" %
+                                      (str(pdir), str(e)))
                     # raise(e)
         elif (pdir.is_dir() and (not pdir.name.startswith('.'))):
 
             if dir_itself:
 
                 if verbose or dry_run:
-                    sys.stderr.write("[%s.%s:%d] Remove directory: '%s'\n" %
-                                     (cls.__name__, 
-                                      inspect.currentframe().f_code.co_name,
-                                      inspect.currentframe().f_lineno, str(pdir)))
+                    cls.StreamExtd().stderr.write("Remove directory: '%s'" % (str(pdir), ))
                 if not dry_run:
                     shutil.rmtree(pdir)
 
@@ -812,10 +909,7 @@ class PyEncase(object):
                     if ifp.name.startswith('.'):
                         continue
                     if verbose or dry_run:
-                        sys.stderr.write("[%s.%s:%d] Remove file or symblic-link: '%s'\n" %
-                                         (cls.__name__, 
-                                          inspect.currentframe().f_code.co_name,
-                                          inspect.currentframe().f_lineno, str(ifp)))
+                        cls.StreamExtd().stderr.write("Remove file or symblic-link: '%s'" % (str(ifp), ))
 
                     if not dry_run:
                         try:
@@ -824,16 +918,10 @@ class PyEncase(object):
                             elif ifp.is_dir():
                                 shutil.rmtree(ifp)
                         except Exception as e:
-                            sys.stderr.write("[%s.%s:%d] Error: removing file or symblic-link: '%s' : %s\n" %
-                                             (cls.__name__, 
-                                              inspect.currentframe().f_code.co_name,
-                                              inspect.currentframe().f_lineno, str(ifp), str(e)))
+                            cls.StreamExtd().stderr.write("Error: removing file or symblic-link: '%s' : %s" % (str(ifp), str(e)))
                             # raise(e)
         else:
-            sys.stderr.write("[%s.%s:%d] Error: Unknown file type: '%s'\n" %
-                             (cls.__name__, 
-                              inspect.currentframe().f_code.co_name,
-                              inspect.currentframe().f_lineno, pdir.name))
+            cls.StreamExtd().stderr.write("Error: Unknown file type: '%s'" % (pdir.name, ))
             # raise(NotADirectoryError)
 
     def clean_env(self, args:argparse.Namespace, rest:list=[]):
@@ -850,83 +938,1195 @@ class PyEncase(object):
             rmlist.append(self.tmpdir)
             
         if flg_verbose or flg_dry_run:
-            sys.stderr.write("[%s.%s:%d] %s : '%s'\n" %
-                             (self.__class__.__name__, 
-                              inspect.currentframe().f_code.co_name,
-                              inspect.currentframe().f_lineno, subcmd, ", ".join(rmlist)))
+            self.stderr.write("s : '%s'" % (subcmd, ", ".join(rmlist)))
         for pdir in rmlist:
             self.__class__.remove_dircontents(path_dir=pdir, 
                                               dir_itself=False,
                                               verbose=flg_verbose, dry_run=flg_dry_run)
 
-    def check_git_config_value(self, key='user.email', mode='--global'):
-        try:
-            result = subprocess.run([self.git_path, 'config', mode, '--get', key],
-                                    check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            value = result.stdout.strip()
-            return bool(value)
-        except subprocess.CalledProcessError:
-            return False
-
-    def setup_git(self, git_user=None, git_email=None, git_url=None, verbose=False, dry_run=False, origin=True):
-        dot_git_path = os.path.join(self.prefix, '.git')
-        if os.path.exists(dot_git_path):
-            if verbose:
-                sys.stderr.write("[%s.%s:%d] : Directory already exists: '%s'\n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno, dot_git_path))
-                return
-
-        git_commands = []
-        
-        git_commands.append([self.git_path, 'init', self.prefix])
-
-        if isinstance(git_user, str) and git_user:
-            git_commands.append([self.git_path, 'config',
-                                 '--file', os.path.join(dot_git_path, 'config'),
-                                 'user.name', git_user])
-        elif not self.check_git_config_value(key='user.name', mode='--global'):
-            git_commands.append([self.git_path, 'config',
-                                 '--file', os.path.join(dot_git_path, 'config'),
-                                 'user.name', getpass.getuser()])
-
-        if isinstance(git_email, str) and git_email:
-            git_commands.append([self.git_path, 'config',
-                                 '--file', os.path.join(dot_git_path, 'config'),
-                                 'user.email', git_email])
-        elif not self.check_git_config_value(key='user.email', mode='--global'):
-            git_commands.append([self.git_path, 'config',
-                                 '--file', os.path.join(dot_git_path, 'config'),
-                                 'user.email', getpass.getuser()+'@'+socket.gethostname()])
+    class ExtCmdIF(StreamExtd):
+    
+        def __init__(self, verbose=False, dry_run=False, encoding='utf-8', **args):
+            super().__init__(**args)
+            self.verbose  = verbose
+            self.dry_run  = dry_run
+            self.encoding = encoding
+    
+        def invoke(self, cmdargs:list, verbose:bool=None, dry_run:bool=None,
+                   check:bool=True, text:bool=True, hook=None,
+                   more_upper:bool=False, encoding=None, **args):
             
-        if isinstance(git_url, str) and git_url:
-            git_commands.append([self.git_path, 
-                                 '--git-dir', dot_git_path, '--work-tree', self.prefix, 
-                                 'remote', 'add', ('origin' if origin else 'upstream'), git_url])
-            git_commands.append([self.git_path, 'config',
-                                 '--file', os.path.join(dot_git_path, 'config'),
-                                 'push.default', current])
+            f_verbose = self.verbose if verbose is None else bool(verbose)
+            f_dry_run = self.dry_run if dry_run is None else bool(dry_run)
+            o_encoding = encoding if encoding else self.encoding
+                
+            if isinstance(cmdargs[0], (list, tuple)):
+                buf = [self.invoke(cmdargs=list(cmdarg), verbose=f_verbose,
+                                   dry_run=f_dry_run, check=check, text=text,
+                                   hook=hook, more_upper=more_upper,
+                                   encoding=o_encoding, **args) for cmdarg in cmdargs ]
+                return tuple(buf) if isinstance(cmdargs, tuple) else buf
+    
+            if f_verbose or f_dry_run:
+                self.stderr.write("Exec : '%s'" % (' '.join(cmdargs),))
+    
+            ret = subprocess.CompletedProcess(cmdargs, returncode=0, stdout='', stderr='')
+            if not f_dry_run:
+                try:
+                    ret = subprocess.run(list(cmdargs), encoding=o_encoding, check=check, 
+                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=text)
+                    if f_verbose:
+                        self.stderr.write("Return code(%s): %d" % (cmdargs[0], ret.returncode, ), more_upper=more_upper)
+                        if ret.stdout:
+                            self.stdout.write("STDOUT(%s)     : '%s'" % (cmdargs[0], ret.stdout, ), more_upper=more_upper)
+                    if ret.stderr:
+                        self.stderr.write("STDERR(%s)     : '%s'" % (cmdargs[0], ret.stderr, ), more_upper=more_upper) 
+                except Exception as e:
+                    self.stderr.write(f"Exec ERROR ({e})", more_upper=more_upper) 
 
-        for _gitcmd in git_commands:
-            if verbose or dry_run:
-                sys.stderr.write("[%s.%s:%d] : Exec : '%s'\n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                inspect.currentframe().f_lineno, " ".join(_gitcmd)))
-            if not dry_run:
-                gitcmdio = subprocess.run(_gitcmd, encoding=self.encoding, 
-                                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                if verbose:
-                    sys.stdout.write("[%s.%s:%d] git output : '%s'\n" %
-                                     (self.__class__.__name__, 
-                                      inspect.currentframe().f_code.co_name,
-                                      inspect.currentframe().f_lineno, gitcmdio.stdout))
-                    sys.stderr.write("[%s.%s:%d] git stderr : '%s'\n" %
-                                     (self.__class__.__name__, 
-                                      inspect.currentframe().f_code.co_name,
-                                      inspect.currentframe().f_lineno, gitcmdio.stderr)) 
+            if callable(hook):
+                hook(cmdargs, ret, **args)
+            return int(ret.returncode)
+        
+    class GitHubIF(StreamExtd):
+        DEFAULT = {'gh_cmd':  'gh'}
+    
+        def __init__(self, opts:argparse.Namespace=None, gh_cmd=None, **kwds):
+            super().__init__(**{k: v for k in kwds.items()
+                                if k in ('stdin', 'stderr', 'stdout')})
+            self.gh_cmd = (opts.gh_cmd if (hasattr(opts, 'gh_cmd') and opts.gh_cmd) else
+                           (gh_cmd if gh_cmd else
+                            os.environ.get('GITHUB_CLI', self.__class__.DEFAULT['gh_cmd'])))
+            
+            self.gh_path   = shutil.which(self.gh_cmd)
+            self.gh_username   = None
+            self.gh_user_id    = None
+            self.gh_user_email = None
+            self.gh_available  = False
+            self.gh_repos      = None
+            self.gh_licences   = []
+            self.gh_gitignore  = []
+            if self.gh_path:
+                try:
+                    gh_ret = subprocess.run([self.gh_path, 'api', 'user'],
+                                            check=True, capture_output=True, text=True)
+                    gh_userinfo = json.loads(gh_ret.stdout)
+                    self.gh_username   = gh_userinfo['login']
+                    self.gh_user_id    = gh_userinfo['id']
+                    self.gh_user_email = f"{self.gh_user_id}+{self.gh_username}@users.noreply.github.com"
+                    self.gh_available  = True
+                    gh_ret = subprocess.run([self.gh_path, 'api', '/licenses', '--paginate'],
+                                            check=True, capture_output=True, text=True)
+                    self.gh_licences  = [ x.get('key') for x in  json.loads(gh_ret.stdout) ]
+                    gh_ret = subprocess.run([self.gh_path, 'api', '/gitignore/templates', '--paginate'],
+                                            check=True, capture_output=True, text=True)
+                    self.gh_gitignore = json.loads(gh_ret.stdout)
+                except Exception as e:
+                    self.stderr.write(f'{self.__class__.__name__}.__init__() Error: {e}')
+                    pass
 
+
+        def __bool__(self):
+            return bool(self.gh_available)
+                
+        def get_repos(self):
+            if self.gh_available:
+                try:
+                    result = subprocess.run([self.gh_path, 'api', 'user/repos', '--paginate'],
+                                            check=True, capture_output=True, text=True)
+                    repos = json.loads(result.stdout)
+                    return { r['name']: (r['full_name'],
+                                         r['html_url'],
+                                         r['clone_url'],
+                                         r['ssh_url']) for r in repos }
+                except Exception as e:
+                    self.stderr.write(f'{self.__class__.__name__}.get_repos() Error: {e}')
+            return {}
+    
+        def chk_repos(self, module, subdir=''):
+            if not self.gh_available:
+                return None
+            if self.gh_repos is None:
+                self.gh_repos = self.get_repos()
+    
+            mod_path = '_'.join([subdir.replace(os.sep, '_', module)]) if subdir else module
+    
+            return not (self.gh_repos.get(mod_path) is None)
+    
+
+        @property
+        def userinfo(self):
+            return (self.gh_username, self.gh_user_email)
+
+        def guess_user(self, opts:argparse.Namespace=None, account=None):
+            github_account = ( opts.git_remote_account if (hasattr(opts, 'git_remote_account')
+                                                           and opts.git_remote_account) else
+                               (account if account else 
+                                (self.gh_username if self.gh_username else
+                                 os.environ.get('GITHUB_USER',
+                                                getpass.getuser()))))
+            return github_account
+    
+        def guess_repo_url_base(self, opts:argparse.Namespace=None,
+                                protocol=None, account=None):
+            github_account = self.guess_user(opts=opts, account=account)
+            github_protocol = ( opts.git_protocol
+                                if (hasattr(opts, 'git_protocol')
+                                    and opts.git_protocol) else protocol )
+    
+            return ( '%s://github.com/%s/' % (github_protocol, github_account)
+                     if github_protocol in ('http', 'https') else
+                     ( '%s://git@github.com/%s/' % (github_protocol, github_account)
+                       if github_protocol == 'ssh' else
+                       'git@github.com:%s/' % (github_account)))
+    
+        def guess_repo_url(self, module, subdir='',
+                           opts:argparse.Namespace=None,
+                           protocol=None, account=None, rmtext='.git'):
+            url_base = self.guess_repo_url_base(opts=opts, protocol=protocol, account=account)
+            mod_path = '_'.join([subdir.replace(os.sep, '_', module)]) if subdir else module
+            return url_base.removesuffix('/')+f'/{module}{rmtext}'
+    
+        def create_repo_cmdargs(self, module, subdir='',
+                                opts:argparse.Namespace=None, description=None,
+                                push=False, proj_name=None, share=None, permit=None,
+                                team_name=None, remote_name=None, source=None,
+                                add_readme=False, add_license=None, add_gitignore=None):
+            
+            if not self.gh_available:
+                return None
+    
+            if self.chk_repos(module=module, subdir=subdir):
+                self.stderr.write(f'{self.__class__.__name__}.setup_repo(): Repository already exists on GitHub: {module}\n')
+                return False
+    
+            mod_path = '_'.join([subdir.replace(os.sep, '_', module)]) if subdir else module
+            cmd_args = [self.gh_path, 'repo',  'create', mod_path]
+            if description:
+                cmd_args.extend(['--description', description])
+    
+            if permit=='internal' and team_name:
+                cmd_args.extend(['--internal', '--team', team_name])
+            elif permit=='public':
+                cmd_args.append('--public')
+            elif permit=='private':
+                cmd_args.append('--private')
+    
+            if push:
+                cmd_args.append(['--push'])
+    
+            if source:
+                cmd_args.extend(['--source', source])
+    
+            if remote_name:
+                cmd_args.extend(['--remote', remote_name])
+    
+            if add_readme:
+                cmd_args.append('--add-readme')
+    
+            if hasattr(opts, 'verbose') and opts.verbose:
+                if proj_name:
+                    self.stderr('WARNING: option "proj_name" is not supported by gh: ignored')
+    
+                if share:
+                    self.stderr('WARNING: option "share" is not supported by gh: ignored')
+                
+            if add_license:
+                if add_license in self.gh_licences:
+                    cmd_args.extend(['--license', add_license])
+                else:
+                    self.stderr.write(f'{self.__class__.__name__}.setup_repo(): Invalid license name : {add_license}\n')
+    
+            if add_gitignore:
+                if add_gitignore in self.gh_gitignore:
+                    cmd_args.extend(['--gitignore', add_gitignore])
+                else:
+                    self.stderr.write(f'{self.__class__.__name__}.setup_repo(): Invalid gitignore template name : {add_gitignore}\n')
+    
+            return cmd_args
+    
+    class GitLabIF(StreamExtd):
+        DEFAULT = {'glab_cmd':  'glab'}
+    
+        def __init__(self, opts:argparse.Namespace=None, glab_cmd=None, **kwds):
+            super().__init__(**{k: v for k in kwds.items()
+                                if k in ('stdin', 'stderr', 'stdout')})
+            self.glab_cmd = (opts.glab_cmd if (hasattr(opts, 'glab_cmd') and opts.glab_cmd) else
+                             (glab_cmd if glab_cmd else
+                              os.environ.get('GITLAB_CLI', self.__class__.DEFAULT['glab_cmd'])))
+            self.glab_path = shutil.which(self.glab_cmd)
+            self.glab_username   = None
+            self.glab_user_id    = None
+            self.glab_user_email = None
+            self.glab_available  = False
+            self.glab_repos      = None
+            if self.glab_path:
+                try:
+                    glab_ret = subprocess.run([self.glab_path, 'api', 'user'],
+                                            check=True, capture_output=True, text=True)
+                    glab_userinfo = json.loads(glab_ret.stdout)
+                    self.glab_username   = glab_userinfo['username']
+                    self.glab_user_id    = glab_userinfo['id']
+                    self.glab_user_email = f"{self.glab_user_id}-{self.glab_username}@users.noreply.gitlab.com"
+                    self.glab_available  = True
+                except Exception as e:
+                    self.stderr.write(f'{self.__class__.__name__}.__init__() Error: {e}')
+    
+        def __bool__(self):
+            return bool(self.glab_available)
+
+        def get_repos(self):
+            if self.glab_available:
+                try:
+                    result = subprocess.run([self.glab_path, 'api',
+                                             #'projects?membership=true&pagination=keyset&per_page=100'
+                                             'projects?membership=true&per_page=100'],
+                                            check=True, capture_output=True, text=True)
+                    repos = json.loads(result.stdout)
+                    return { r['path']: (r['path_with_namespace'],
+                                         r['web_url'],
+                                         r['http_url_to_repo'],
+                                         r['ssh_url_to_repo']) for r in repos }
+                except Exception as e:
+                    self.stderr.write(f'{self.__class__.__name__}.get_repos() Error: {e}')
+    
+            return {}
+    
+        def chk_repos(self, module, subdir=''):
+            if not self.glab_available:
+                return None
+            if self.glab_repos is None:
+                self.glab_repos = self.get_repos()
+    
+            mod_path = '_'.join([subdir.replace(os.sep, '_', module)]) if subdir else module
+    
+            return not (self.glab_repos.get(mod_path) is None)
+    
+        @property
+        def userinfo(self):
+            return (self.glab_username, self.glab_user_email)
+
+        def guess_user(self, opts:argparse.Namespace=None, account=None):
+            gitlab_account = ( opts.git_remote_account if (hasattr(opts, 'git_remote_account')
+                                                           and opts.git_remote_account) else
+                               (account if account else 
+                                (self.glab_username if self.glab_username else
+                                os.environ.get('GITLAB_USER',
+                                               getpass.getuser()))))
+            return gitlab_account
+    
+        def guess_repo_url_base(self, opts:argparse.Namespace=None,
+                                protocol=None, account=None):
+            gitlab_account = self.guess_user(opts=opts, account=account)
+            gitlab_protocol = ( opts.git_protocol
+                                if (hasattr(opts, 'git_protocol')
+                                    and opts.git_protocol) else protocol )
+    
+            return ( '%s://gitlab.com/%s/' % (gitlab_protocol, gitlab_account)
+                     if gitlab_protocol in ('http', 'https') else
+                     ( '%s://git@gitlab.com/%s/' % (gitlab_protocol, gitlab_account)
+                       if gitlab_protocol == 'ssh' else
+                       'git@gitlab.com:%s/'     % (gitlab_account, )))
+    
+        def guess_repo_url(self, module, subdir='',
+                           opts:argparse.Namespace=None,
+                           protocol=None, account=None, rmtext='.git'):
+            url_base = self.guess_repo_url_base(opts=opts, protocol=protocol, account=account)
+            mod_path = '_'.join([subdir.replace(os.sep, '_', module)]) if subdir else module
+            return url_base.removesuffix('/')+f'/{module}{rmtext}'
+        
+        def create_repo_cmdargs(self, module, subdir='',
+                                opts:argparse.Namespace=None, description=None,
+                                push=False, proj_name=None, share=None, permit=None,
+                                team_name=None, remote_name=None, source=None,
+                                add_readme=False, add_license=None, add_gitignore=None):
+    
+            if not self.glab_available:
+                return None
+            if self.chk_repos(module=module, subdir=subdir):
+                self.stderr.write(f'{self.__class__.__name__}.setup_repo(): Repository already exists on Gitlab: {module}\n')
+                return False
+    
+            mod_path = '_'.join([subdir.replace(os.sep, '_', module)]) if subdir else module
+            cmd_args = [self.glab_path, 'repo',  'create', mod_path]
+    
+            if description:
+                cmd_args.extend(['--description', description])
+    
+            if permit=='internal' and team_name:
+                cmd_args.extend(['--internal', '--group', team_name])
+            elif permit=='public':
+                cmd_args.append('--public')
+            elif permit=='private':
+                cmd_args.append('--private')
+    
+            if proj_name:
+                cmd_args.extend(['--name', proj_name])
+    
+            if remote_name:
+                cmd_args.extend(['--remoteName', remote_name])
+    
+            if add_readme:
+                cmd_args.extend(['--readme'])
+
+            if hasattr(opts, 'verbose') and opts.verbose:
+                if push:
+                    self.stderr('WARNING: option "push" is not supported by glab: ignored')
+    
+                if source:
+                    self.stderr('WARNING: option "source" is not supported by glab: ignored')
+    
+                if share:
+                    self.stderr('WARNING: option "share" is not supported by glab: ignored')
+                
+                if add_license:
+                    self.stderr('WARNING: option "add_license" is not supported by glab: ignored')
+    
+                if add_gitignore:
+                    self.stderr('WARNING: option "add_gitignore" is not supported by glab: ignored')
+                
+            return cmd_args
+    
+    class GitSSHIF(StreamExtd):
+        DEFAULT = {'ssh_cmd': 'ssh',
+                   'git_cmd': 'git'}
+    
+        reg_top_pttrn   = re.compile(r'^\s*top=\s*')
+        reg_share_pttrn = re.compile(f'^(?P<shareopt>false|true|umask|group|all|world|everybody|\d{3,4})$', re.A)
+        
+        def __init__(self, 
+                     opts:argparse.Namespace=None,
+                     remote_host=None,
+                     ssh_account=None,
+                     repository_dir=None,
+                     ssh_cmd=None,
+                     git_cmd=None,
+                     remote_git_cmd=None,
+                     ssh_port=None, ssh_opts=[], **kwds):
+            super().__init__(**{k: v for k in kwds.items()
+                                if k in ('stdin', 'stderr', 'stdout')})
+    
+            self.ssh_cmd = (opts.ssh_cmd if (hasattr(opts, 'ssh_cmd') and opts.ssh_cmd) else
+                            (ssh_cmd if ssh_cmd else 
+                             os.environ.get('SSH', self.__class__.DEFAULT['ssh_cmd'])))
+            self.git_cmd = (opts.git_cmd if (hasattr(opts, 'git_cmd') and opts.git_cmd) else
+                            (git_cmd if git_cmd else 
+                             os.environ.get('GIT', self.__class__.DEFAULT['git_cmd'])))
+            self.ssh_path = shutil.which(self.ssh_cmd)
+            self.git_path = shutil.which(self.git_cmd)
+            self.ssh_port = (opts.git_remote_port if (hasattr(opts, 'git_remote_port')
+                                                      and opts.git_remote_port) else ssh_port)
+            
+            self.remote_git_cmd = (opts.git_remote_cmd if (hasattr(opts, 'git_remote_cmd')
+                                                           and opts.git_remote_cmd) else
+                                   (remote_git_cmd if remote_git_cmd else 
+                                    os.environ.get('REMOTE_GIT', 
+                                                os.environ.get('GIT', 
+                                                               self.__class__.DEFAULT['git_cmd']))))
+    
+            self.remote_host     = (opts.git_remote_host if (hasattr(opts, 'git_remote_host')
+                                                            and opts.git_remote_host) else
+                                    (remote_host if remote_host else
+                                     os.environ.get('GIT_REMOTE_HOST')))
+            self.remote_dir      = (opts.git_remote_path if (hasattr(opts, 'git_remote_path')
+                                                             and opts.git_remote_path) else
+                                    (repository_dir if repository_dir else
+                                     os.environ.get('GIT_REMOTE_DIR', 
+                                                    os.path.join('~', 'git_repositories'))))
+            self.ssh_account     = (opts.git_remote_account if (hasattr(opts, 'git_remote_account')
+                                                             and opts.git_remote_account) else
+                                    (ssh_account if ssh_account else 
+                                     os.environ.get('GIT_REMOTE_USER', getpass.getuser())))
+            self.gitrmt_available = ( isinstance(self.remote_host, str) and self.remote_host )
+            self.gitrmt_repos_buf = None
+            self.ssh_cmd_common   = [self.ssh_path]
+            if self.ssh_port is not None:
+                self.ssh_cmd_common.expand(['-P', self.ssh_port])
+            if self.ssh_account != getpass.getuser():
+                self.ssh_cmd_common.expand(['-l', self.ssh_account])
+    
+            ssh_cmmd_opts = ([( x.removeprefix('\\')
+                                if x.startswith('\\-') else x )
+                              for x in opts.git_remote_sshopts ]
+                             if (hasattr(opts, 'git_remote_sshopts')
+                                 and isinstance(opts.git_remote_sshopts, list)) else
+                             (list(ssh_opts) if isinstance(ssh_opts, (list,tuple)) else []))
+            
+            self.ssh_cmd_common.extend(ssh_cmmd_opts)
+            self.ssh_cmd_common.append(self.remote_host)
+    
+            self.remote_dir_expnd = self.expand_remote_path(self.remote_dir)
+    
+        def __bool__(self):
+            return bool(self.gitrmt_available)
+
+        def get_repos_buf(self, rmtext='.git'):
+            if self.gitrmt_available:
+                self.gitrmt_repos_buf = {}
+                try:
+                    ret = subprocess.run(self.ssh_cmd_common
+                                         +['(', 'echo', 'top=', self.remote_dir, ';',
+                                           'find', self.remote_dir, 
+                                           '-follow', '\(',  '-name',  '.git',  '-o',  '-name',  'HEAD', '\)'
+                                           ')'],
+                                         check=True, capture_output=True, text=True)
+                    if ret.returncode==0:
+                        rmt_repos_dir = self.remote_dir
+                        for line in ret.stdout.splitlines():
+                            if line.startswith('top='):
+                                rmt_repos_dir = self.__class__.reg_top_pttrn.sub('', line)
+                                continue
+                            pl = pathlib.Path(os.path.dirname(line))
+                            if pl.name == '.git':
+                                pl = pl.parent
+                            rel_pl = pl.relative_to(rmt_repos_dir)
+    
+                            rpath  = str(rel_pl.name) # .removesuffix(rmtext)
+                            subdir = str(rel_pl.parent) if len(rel_pl.parents)>1 else ''
+                            repnm = rel_pl.name.removesuffix(rmtext)
+                            
+                            if self.gitrmt_repos_buf.get(repnm) is None:
+                                self.gitrmt_repos_buf.update({repnm: {}})
+    
+                            self.gitrmt_repos_buf.get(repnm).update({subdir: (rpath, rmt_repos_dir)})
+                except Exception as e:
+                    self.stderr.write(f'{self.__class__.__name__}.get_repos_buf() Error: {e}')
+    
+            return self.gitrmt_repos_buf
+    
+        def get_repos(self):
+            if not self.gitrmt_available:
+                return None
+    
+            if self.gitrmt_repos_buf is None:
+                self.get_repos_buf()
+            return { os.path.join(s,k) : (k, #os.path.join(s, r[0].removesuffix('.git')),
+                          f'ssh://{self.ssh_account}@{self.remote_host}/{r[1].removeprefix("/")}/'+os.path.join(s, r[0]),
+                          f'ssh://{self.ssh_account}@{self.remote_host}/{r[1].removeprefix("/")}/'+os.path.join(s, r[0]),
+                          f'{self.ssh_account}@{self.remote_host}:{self.remote_dir}/'+os.path.join(s, r[0]))
+                     for k,v in self.gitrmt_repos_buf.items() for s,r in v.items() }
+    
+        def chk_repos(self, module, subdir=''):
+            if not self.gitrmt_available:
+                return None
+            if self.gitrmt_repos_buf is None:
+                self.get_repos_buf()
+            return not (self.gitrmt_repos_buf.get(os.path.join(subdir, module)) is None)
+    
+        @property
+        def userinfo(self):
+            return (self.ssh_account, self.ssh_account+'@'+self.remote_host)
+
+        def guess_user(self, opts:argparse.Namespace=None, account=None):
+            return ( opts.git_remote_account if (hasattr(opts, 'git_remote_account')
+                                                           and opts.git_remote_account) else
+                     (account if account else self.ssh_account))
+    
+        def expand_remote_path(self, path):
+            if not self.gitrmt_available:
+                return path
+            rmt_path = path
+            try:
+                ret = subprocess.run(self.ssh_cmd_common+['(', 'echo', 'top=', path, ')'],
+                                     check=True, capture_output=True, text=True)
+                if ret.returncode==0:
+                    for line in ret.stdout.splitlines():
+                        if line.startswith('top='):
+                            return self.__class__.reg_top_pttrn.sub('', line)
+                return rmt_path
+            except Exception as e:
+                self.stderr.write(f'{self.__class__.__name__}.expand_remote_path({path}) Error: {e}')
+            return rmt_path
+    
+        def guess_repo_url_base(self, opts:argparse.Namespace=None,
+                                protocol=None, account=None, port=None):
+            if not self.gitrmt_available:
+                return None
+    
+            gitrmt_account = self.guess_user(opts=opts, account=account)
+            gitrmt_protocol = ( opts.git_protocol
+                                if (hasattr(opts, 'git_protocol')
+                                    and opts.git_protocol) else protocol )
+
+            gitrmt_port = (opts.git_remote_port if (hasattr(opts, 'git_remote_port')
+                                                    and opts.git_remote_port) else
+                           (port if port else
+                            self.ssh_port if gitrmt_protocol=='ssh' else None))
+            
+            return ( '%s://%s@%s%s/%s/' % (gitrmt_protocol, gitrmt_account,
+                                           self.remote_host,
+                                           ':'+self.ssh_port if self.ssh_port else '',
+                                           self.remote_dir_expnd)
+                     if gitrmt_protocol in ('http', 'https') else
+                     ( '%s://%s@%s%s/%s/' % (gitrmt_protocol, gitrmt_account,
+                                             self.remote_host,
+                                             (':'+gitrmt_port) if gitrmt_port else '',
+                                             self.remote_dir_expnd)
+                       if gitrmt_protocol=='ssh' else
+                       ('%s@%s:%s/' % (gitrmt_account, self.remote_host, self.remote_dir)
+                        if not self.ssh_port else
+                        '%s://%s@%s%s/%s/' % (gitrmt_protocol, gitrmt_account,
+                                              self.remote_host,
+                                              (':'+gitrmt_port) if gitrmt_port else '',
+                                              self.remote_dir_expnd))))
+        
+        def guess_repo_url(self, module, subdir='',
+                           opts:argparse.Namespace=None,
+                           protocol=None, account=None, port=None, rmtext='.git'):
+            if not self.gitrmt_available:
+                return None
+
+            url_base = self.guess_repo_url_base(opts=opts, protocol=protocol,
+                                                account=account, port=port)
+            return url_base.removesuffix('/')+f'/{os.path.join(subdir, module)}{rmtext}'
+        
+    
+        def create_repo_cmdargs(self, module, subdir='',
+                                opts:argparse.Namespace=None, description=None,
+                                push=False, proj_name=None, share=None, permit=None,
+                                team_name=None, remote_name=None, source=None,
+                                add_readme=False, add_license=None, add_gitignore=None,
+                                rmtext='.git'):
+    
+            if not self.gitrmt_available:
+                return None
+    
+            if self.chk_repos(module=module, subdir=subdir):
+                self.stderr.write(f'{self.__class__.__name__}.setup_repo(): '
+                                 f'Repository already exists on {self.remote_host} '
+                                 f': {os.path.join(subdir,module)}\n')
+                return False
+
+            if hasattr(opts, 'verbose') and opts.verbose:
+                if description:
+                    self.stderr.write("Warning: 'description' is not supported")
+                if push:
+                    self.stderr.write("Warning: 'push' is not supported")
+                if proj_name:
+                    self.stderr.write("Warning: 'proj_name' is not supported")
+                if permit:
+                    self.stderr.write("Warning: 'permit' is not supported")
+                if team_name:
+                    self.stderr.write("Warning: 'team_name' is not supported")
+                if remote_name:
+                    self.stderr.write("Warning: 'remote_name' is not supported")
+                if source:
+                    self.stderr.write("Warning: 'source' is not supported")
+                if add_readme:
+                    self.stderr.write("Warning: 'add_readme' is not supported")
+                if add_license:
+                    self.stderr.write("Warning: 'add_license' is not supported")
+                if add_gitignore:
+                    self.stderr.write("Warning: 'add_gitignore' is not supported")
+            
+            cmd_args = []
+            cmd_args.extend(self.ssh_cmd_common)
+            rmt_repo_path = os.path.join(self.remote_dir, subdir, module.removesuffix(rmtext)+rmtext)
+    
+            cmd_args.extend(['(', 'test', '-d', rmt_repo_path, '||'])
+            cmd_args.extend([self.remote_git_cmd, 'init', '--bare'])
+            
+            if isinstance(share,str):
+                m = self.__class__.reg_share_pttrn.match(share)
+                if m:
+                    cmd_args.append(f'--share={m.group("shareopt")}')
+                elif share:
+                    cmd_args.append('--share')
+            elif share:
+                cmd_args.append('--share')
+            cmd_args.extend([rmt_repo_path, ')'])
+    
+            return cmd_args
+    
+    class GitIF(ExtCmdIF):
+    
+        PTTRN_OPTARG = re.compile(r'^-*(?P<long>(?P<short>[^-\s]{1})(?P<rest>[^\s]*))')
+    
+        DEFAULT = {
+            'git_remote_host' : None,
+            'git_local_path'  : '~/git_repositories', #None,
+            'git_remote_path' : '~/git_repositories', #None,
+            'git_cmd'         : 'git',
+            'git_remote_name' : 'origin',
+        }
+        
+        def __init__(self,
+#                     repo_name,
+                     opts:argparse.Namespace=None,
+                     local_path=None,
+                     url=None,
+                     hosting=None,
+                     host=None, port=None, remote_path=None,
+                     protocol=None, remote_account=None,
+                     user_name=None, user_email=None,
+                     subdir=None, gh_cmd=None, glab_cmd=None, ssh_cmd=None,
+                     git_cmd=None, remote_git_cmd=None,
+                     verbose=False, dry_run=False, encoding='utf-8', **kwds):
+            
+            super().__init__(**{k: v for k in kwds.items()
+                                if k in ('verbose', 'dry_run', 'encoding',
+                                         'stdin', 'stderr', 'stdout')})
+    
+            self.git_path = shutil.which(opts.git_cmd if (hasattr(opts, 'git_cmd')
+                                                          and opts.git_cmd) else
+                                         (git_cmd if git_cmd else
+                                          self.__class__.DEFAULT.get('git_cmd', 'git')))
+            
+            urlprsd = urllib.parse.urlparse((opts.git_remote_url
+                                             if (hasattr(opts, 'git_remote_url')
+                                                 and opts.git_remote_url) else
+                                             (url if url else '')), scheme='ssh')
+            
+            self.remote_host = ( opts.git_remote_host if (hasattr(opts, 'git_remote_host')
+                                                 and opts.git_remote_host) else
+                                 (urlprsd.hostname if urlprsd.hostname else
+                                  ( host if host else
+                                    os.environ.get('GIT_REMOTE_HOST',
+                                                   self.__class__.DEFAULT.get('git_remote_host')))))
+    
+            self.remote_account = (opts.git_remote_account
+                                   if (hasattr(opts, 'git_remote_account')
+                                       and opts.git_remote_account) else
+                                   (urlprsd.username if urlprsd.username else
+                                    (remote_account if remote_account else
+                                     os.environ.get('GIT_REMOTE_USER',
+                                                    getpass.getuser()))))
+
+            self.remote_port = (opts.git_remote_port if (hasattr(opts, 'git_remote_port')
+                                                and opts.git_remote_port) else
+                       (urlprsd.port if urlprsd.port else
+                        (port if port else
+                         os.environ.get('GIT_REMOTE_PORT', None))))
+    
+            self.local_path = (opts.git_local_path if (hasattr(opts, 'git_local_path')
+                                                       and opts.git_local_path) else
+                               (urlprsd.path.removeprefix('/') if urlprsd.path.startswith('/~') else
+                                (urlprsd.path if urlprsd.path else
+                                 ( local_path if local_path else
+                                   os.environ.get('GIT_LOCAL_PATH',
+                                                  self.__class__.DEFAULT['git_local_path'])))))
+            
+            self.remote_path = (opts.git_remote_path if (hasattr(opts, 'git_remote_path')
+                                                             and opts.git_remote_path) else
+                       (urlprsd.path.removeprefix('/') if urlprsd.path.startswith('/~') else
+                        (urlprsd.path if urlprsd.path else
+                         ( remote_path if remote_path else
+                           os.environ.get('GIT_REMOTE_PATH',
+                                          self.__class__.DEFAULT['git_remote_path'])))))
+    
+            # if not repo_name:
+            #     self.stderr.write(f'Remote repository name is not specified: {str(repo_name)}')
+            #     # status += 1
+            #     # return status 
+            #     raise ValueError(f'{self.__class__.__name__}.__init__() Error: Remote repository name is not specified')
+    
+            self.gitrmt_if = None
+            __outer__ = globals().get(self.__class__.__qualname__.split('.')[0])
+
+
+            _hosting = ( opts.git_hosting if (hasattr(opts, 'git_hosting') and
+                                              opts.git_hosting is not None ) else hosting )
+            
+            if isinstance(_hosting, str) and _hosting.lower()=='github':
+                self.gitrmt_if = __outer__.GitHubIF(opts=opts, gh_cmd=gh_cmd)
+                if not self.gitrmt_if.gh_available:
+                    self.gitrmt_if = None
+                ####################
+                # To be implimented
+                ####################
+            elif isinstance(_hosting, str) and _hosting.lower()=='gitlab':
+                self.gitrmt_if = __outer__.GitLabIF(opts=opts, glab_cmd=glab_cmd)
+                if not self.gitrmt_if.glab_available:
+                    self.gitrmt_if = None
+                ####################
+                # To be implimented
+                ####################
+            elif (not urlprsd.scheme) or (urlprsd.scheme == 'ssh'):
+                self.gitrmt_if = __outer__.GitSSHIF(opts=opts,
+                                                    remote_host=host,
+                                                    ssh_account=self.remote_account,
+                                                    repository_dir=self.remote_path,
+                                                    ssh_cmd=ssh_cmd,
+                                                    git_cmd=git_cmd,
+                                                    remote_git_cmd=remote_git_cmd,
+                                                    ssh_port=self.remote_port)
+                
+            if self.gitrmt_if is not None:
+                self.rmt_url_base = self.gitrmt_if.guess_repo_url_base(opts=opts,
+                                                                       protocol=protocol,
+                                                                       account=self.remote_account)
+            else:
+                schm  = (urlprsd.scheme
+                         if urlprsd.scheme in ('https', 'http', 'ssh') else 'ssh')
+    
+                rmthst, rmtaccnt, rmtpth = (('github.com', 'git', self.remote_account)
+                                            if isinstance(_hosting, str) and _hosting.lower()=='github'
+                                            else (('gitlab.com', 'git', self.remote_account)
+                                                  if isinstance(_hosting, str) and _hosting.lower()=='gitlab'
+                                                  else (self.remote_host, self.remote_account, self.remote_path)))
+    
+                portsuffix = '' if self.remote_port is None else ':'+str(self.remote_port)
+                self.rmt_url_base = f'{schm}://{rmtaccnt+"@" if rmtaccnt else ""}{portsuffix}/{rmtpth.removeprefix("/")}'
+
+
+        @property
+        def userinfo(self):
+            return (self.gitrmt_if.userinfo 
+                    if self.gitrmt_if else 
+                    (self.remote_account, 
+                     self.remote_account+'@'+(self.remote_host
+                                              if self.remote_host
+                                              else socket.gethostname())))
+    
+        @classmethod
+        def add_argument(cls, arg_parser:argparse.ArgumentParser,
+                         opt_s:str=None, opt_l:str=None, **opt_args):
+            optarg_defined = arg_parser._option_string_actions.keys()
+            argstr = []
+            
+            if opt_s:
+                m = cls.PTTRN_OPTARG.match(opt_s)
+                if m and m.group('short'):
+                    s_opt = '-'+m.group('short')
+                    if not s_opt in optarg_defined:
+                        argstr.append(s_opt)
+    
+            if opt_l:
+                m = cls.PTTRN_OPTARG.match(opt_l)
+                if m and m.group('long'):
+                    l_opt = '--'+m.group('long')
+                    if not l_opt in optarg_defined:
+                        argstr.append(l_opt)
+    
+            if len(argstr)<1:
+                # raise ValueError(r"There is no un-used valid option arguments {str(opt_s)},{str(opt_l)}")
+                StreamExtd().stderr.write(r"Warning: There is no un-used valid option arguments {str(opt_s)},{str(opt_l)}")
+                return None
+            return arg_parser.add_argument(*argstr, **opt_args)
+
+
+        class UseGitHostingUserInfoAction(argparse.Action):
+
+            def __call__(self, parser, namespace, values, option_string=None):
+
+                __outer__ = globals().get(self.__class__.__qualname__.split('.')[0])
+
+                
+                if option_string == '--github-userinfo':
+                    gitxxb_if = __outer__.GitHubIF(opts=namespace)
+                    if not gitxxb_if:
+                        __outer__.StreamExtd().write(f'GitHub CLI("gh") is unavailable (skipped) : {option_string}')
+                        return
+                        
+                elif option_string == '--gitlab-userinfo':
+                    gitxxb_if = __outer__.GitLabIF(opts=namespace)
+                    if not gitxxb_if:
+                        __outer__.StreamExtd().stderr.write(f'GitLab CLI("glab") is unavailable (skipped) : {option_string}')
+                        return
+                else:
+                    __outer__.StreamExtd().write(f'Internal Error: unsupported option (skipped) : {option_string}')
+                    return
+
+                for dest,val in zip(('git_user_name', 'git_user_email'), gitxxb_if.userinfo):
+                    if not val:
+                        continue
+                    setattr(namespace, dest, val)
+
+                return
+        
+        @classmethod
+        def add_remoteif_arguments(cls, arg_parser:argparse.ArgumentParser):
+            # Flags
+            cls.add_argument(arg_parser, opt_s='-y', opt_l='--git-set-upstream', action='store_true', default=None, help='git set upstream')
+            cls.add_argument(arg_parser, opt_s='-R', opt_l='--git-remote-setup', action='store_true', default=None, help='Setup git remote bare repository')
+            # Options
+            cls.add_argument(arg_parser, opt_s='-u', opt_l='--git-user-name',  help='Specify git user name')
+            cls.add_argument(arg_parser, opt_s='-e', opt_l='--git-user-email', help='Specify git user email')
+            #
+            cls.add_argument(arg_parser, opt_s=None, opt_l='--github-userinfo',
+                             action=cls.UseGitHostingUserInfoAction, nargs=0,
+                             help='Guess git user name/email by github CLI("gh")')
+            cls.add_argument(arg_parser, opt_s=None, opt_l='--gitlab-userinfo',
+                             action=cls.UseGitHostingUserInfoAction, nargs=0,
+                             help='Guess git user name/email by gitlab CLI("glab")')
+            #
+            cls.add_argument(arg_parser, opt_s='-T', opt_l='--git-repository-name', help='Git remote repository name')
+            cls.add_argument(arg_parser, opt_s='-H', opt_l='--git-hosting',  choices=('github', 'gitlab'), default=None, help='git hosting service')
+            cls.add_argument(arg_parser, opt_s='-z', opt_l='--git-protocol', choices=('http', 'https', 'ssh'), default=None, help='git protocol')
+            cls.add_argument(arg_parser, opt_s='-U', opt_l='--git-remote-url', help='git remote URL')
+            cls.add_argument(arg_parser, opt_s='-l', opt_l='--git-remote-account', help='github/gitlab/remote_host account-name')
+            # cls.add_argument(arg_parser, opt_s='-W', opt_l='--git-remote-password', help='github/gitlab/remote_host account password')
+            cls.add_argument(arg_parser, opt_s='-L', opt_l='--git-remote-host', help='git remote host')
+            cls.add_argument(arg_parser, opt_s=None, opt_l='--git-remote-port', help='port id for git remote access')
+            cls.add_argument(arg_parser, opt_s='-w', opt_l='--git-remote-path', help='git remote repository path')
+            cls.add_argument(arg_parser, opt_s='-X', opt_l='--git-remote-sshopts', action='append', default=[], help='ssh options to connect git-remote (Escape first - by "\\")')
+            cls.add_argument(arg_parser, opt_s='-Z', opt_l='--git-remote-cmd',     help='git command @ git remote host')
+            cls.add_argument(arg_parser, opt_s=None, opt_l='--git-remote-share', default=None, help='Argument of git init --share option for remote host')
+            cls.add_argument(arg_parser, opt_s=None, opt_l='--git-remote-name', default=None, help=f'Git remote name (default:{cls.DEFAULT["git_remote_name"]})')
+            cls.add_argument(arg_parser, opt_s=None, opt_l='--ssh-command', help='ssh command')
+            #cls.add_argument(arg_parser, opt_s='-g', opt_l='--git-command', help='git command')
+            cls.add_argument(arg_parser, opt_s=None, opt_l='--gh-command', help='gh command')
+            cls.add_argument(arg_parser, opt_s=None, opt_l='--glab-command', help='glab command')
+    
+            return
+
+        @classmethod
+        def add_invokeoptions_arguments(cls, arg_parser:argparse.ArgumentParser):
+            # Flags
+            cls.add_argument(arg_parser, opt_s='-v', opt_l='--verbose', default=None, action='store_true', help='Show verbose infomation')
+            cls.add_argument(arg_parser, opt_s='-n', opt_l='--dry-run', default=None, action='store_true', help='Dry-run mode')
+            return
+
+            
+        def remote_repo_url_base(self):
+            return self.rmt_url_base
+        
+        def remote_repo_url(self, module, subdir='',
+                            opts:argparse.Namespace=None,
+                            protocol=None, account=None, rmtext='.git'):
+            if self.gitrmt_if is not None:
+                return self.gitrmt_if.guess_repo_url(module=module, subdir=subdir, opts=opts,
+                                                     protocol=protocol, account=account, rmtext=rmtext)
+    
+            return self.rmt_url_base.removesuffix('/')+f'/{os.path.join(subdir, module)}{rmtext}'
+
+
+        def guess_module_name(self, opts:argparse.Namespace=None, module=None):
+            return ( opts.git_repository_name
+                     if (hasattr(opts, 'git_repository_name')
+                         and opts.git_repository_name) else
+                     ( module if module else
+                       os.path.basename(self.local_path.removesuffix('/'))))
+        
+        def git_config_value_cmdargs(self, module=None, subdir='',
+                                     key='user.email', mode='--global',
+                                     local_workdir=None, local_git_dir=None,
+                                     opts:argparse.Namespace=None, git_cmd_args=[]):
+
+            o_module = self.guess_module_name(opts=opts, module=module)
+
+            workdir = ( local_workdir if local_workdir else 
+                        os.path.join(self.local_path, subdir, o_module))
+            
+            dot_git_dir = (local_git_dir if local_git_dir else
+                           os.path.join(workdir, '.git'))
+                        
+            cmdarg = [ self.git_path ]
+
+            if dot_git_dir:
+                # '--git-dir',  dot_git_dir, '--work-tree', local_workdir, 
+                cmdarg.extend(['--file', os.path.join(dot_git_dir, 'config')])
+            
+            cmdarg.extend(['config', mode, '--get', key])
+                
+            git_cmd_args.append(cmdarg)
+
+            return git_cmd_args
+
+        def get_git_config_value(self, module=None, subdir='',
+                                 key='user.email', mode='--global',
+                                 local_workdir=None, local_git_dir=None,
+                                 opts:argparse.Namespace=None):
+            try:
+                cmdargs = self.git_config_value_cmdargs(module=module, subdir=subdir,
+                                                        key=key, mode=mode,
+                                                        local_workdir=local_workdir,
+                                                        local_git_dir=local_git_dir,
+                                                        opts=opts, git_cmd_args=[])
+                ret = subprocess.run(cmdargs[0], check=True,
+                                     stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE, text=True)
+                value = ret.stdout.strip()
+            except subprocess.CalledProcessError:
+                return None
+
+        def chk_git_config_value(self, module='', subdir='',
+                                 key='user.email', mode='--global',
+                                 local_workdir=None, local_git_dir=None,
+                                 opts:argparse.Namespace=None):
+            return bool(self.get_git_config_value(module=module, subdir=subdir,
+                                                  key=key, mode=mode,
+                                                  local_workdir=local_workdir,
+                                                  local_git_dir=local_git_dir, opts=opts))
+
+        def init_local_cmdargs(self, module=None, subdir='',
+                               local_workdir=None,
+                               opts:argparse.Namespace=None,
+                               share=None, git_cmd_args=[]):
+
+            o_module = self.guess_module_name(opts=opts, module=module)
+
+            workdir = ( local_workdir if local_workdir else 
+                        os.path.join(self.local_path, subdir, o_module))
+            
+            if os.path.exists(os.path.join(workdir, '.git')):
+                self.stderr.write(f'Warning: Repository already exists (skillped): {workdir}\n')
+                return git_cmd_args
+
+            cmd_args = [self.git_path, 'init']
+            if isinstance(share,str):
+                m = self.__class__.reg_share_pttrn.match(share)
+                if m:
+                    cmd_args.append(f'--share={m.group("shareopt")}')
+                elif share:
+                    cmd_args.append('--share')
+            elif share:
+                cmd_args.append('--share')
+            cmd_args.extend([workdir])
+            git_cmd_args.append(cmd_args)
+
+            return git_cmd_args
+
+
+        def config_minimum_cmdargs(self, module=None, subdir='',
+                                   local_workdir=None,
+                                   opts:argparse.Namespace=None,
+                                   user_name=None, user_email=None,
+                                   dot_git_dir=None, git_cmd_args=[]):
+
+            o_module = self.guess_module_name(opts=opts, module=module)
+            
+            workdir = ( local_workdir if local_workdir else 
+                        os.path.join(self.local_path, subdir, o_module))
+            
+            dtgit_dir = (dot_git_dir if dot_git_dir else
+                         os.path.join(workdir, '.git'))
+
+            config_path = os.path.join(dtgit_dir, 'config')        
+
+            git_user_name = ( opts.git_user_name
+                              if (hasattr(opts, 'git_user_name')
+                                  and opts.git_user_name) else user_name )
+
+            git_user_email = ( opts.git_user_email
+                               if (hasattr(opts, 'git_user_email')
+                                   and opts.git_user_email) else user_email )
+            
+            if isinstance(git_user_name, str) and git_user_name:
+                git_cmd_args.append([self.git_path,
+                                     'config', '--file', config_path,
+                                     'user.name', git_user_name])
+
+            elif not self.chk_git_config_value(module=module, subdir=subdir,
+                                               key='user.name', mode='--global',
+                                               local_workdir=workdir,
+                                               local_git_dir=dtgit_dir, opts=opts):
+                git_cmd_args.append([self.git_path,
+                                     'config', '--file', config_path,
+                                     'user.name', getpass.getuser()])
+
+                
+            if isinstance(git_user_email, str) and git_user_email:
+                git_cmd_args.append([self.git_path,
+                                     'config', '--file', config_path,
+                                     'user.email', git_user_email])
+
+            elif not self.chk_git_config_value(key='user.email', mode='--global',
+                                               local_workdir=workdir,
+                                               local_git_dir=dtgit_dir, opts=opts):
+                git_cmd_args.append([self.git_path,
+                                     'config', '--file', config_path,
+                                     'user.email', getpass.getuser()+'@'+socket.gethostname()])
+                
+            return git_cmd_args
+
+
+        def create_remote_repo_cmdargs(self, module=None, subdir='',
+                                       opts:argparse.Namespace=None, description=None,
+                                       push=False, proj_name=None,
+                                       share=None, permit=None, team_name=None,
+                                       remote_name=None, source=None,
+                                       add_readme=False, add_license=None,
+                                       add_gitignore=None, git_cmd_args=[]):
+
+            o_module = self.guess_module_name(opts=opts, module=module)
+            
+            if self.gitrmt_if is None:
+                self.stderr.write('GitHubIF/GitLabIF/GitSSHIF object is unavailable: (skip) Please create manually.')
+            else:
+                cmdarg = self.gitrmt_if.create_repo_cmdargs(module=o_module,
+                                                            subdir=subdir,
+                                                            opts=opts,
+                                                            description=description,
+                                                            push=push,
+                                                            proj_name=proj_name,
+                                                            share=share, permit=permit,
+                                                            team_name=team_name,
+                                                            remote_name=remote_name,
+                                                            source=source,
+                                                            add_readme=add_readme,
+                                                            add_license=add_license,
+                                                            add_gitignore=add_gitignore)
+                if isinstance(cmdarg, (list, tuple)):
+                    git_cmd_args.append(list(cmdarg))
+            return git_cmd_args
+        
+        def set_upstream_cmdargs(self, module=None, subdir='',
+                                 local_workdir=None,
+                                 opts:argparse.Namespace=None,
+                                 remote_url=None, local_git_dir=None, remote_name=None,                                
+                                 protocol=None, account=None, rmtext='.git', git_cmd_args=[]):
+
+            o_module = self.guess_module_name(opts=opts, module=module)
+
+            workdir = ( local_workdir if local_workdir else 
+                        os.path.join(self.local_path, subdir, o_module))
+            
+            remote_url = (opts.git_remote_url if (hasattr(opts, 'git_remote_url')
+                                                  and opts.git_remote_url) else
+                          (remote_url if remote_url else 
+                           self.remote_repo_url(opts=opts, module=o_module, subdir=subdir,
+                                                protocol=protocol, account=account, rmtext=rmtext)))
+            
+            rmt_name = (opts.git_remote_name if (hasattr(opts, 'git_remote_name')
+                                                  and opts.git_remote_name) else
+                        ( remote_name if remote_name else
+                          self.__class__.DEFAULT['git_remote_name'] ))
+    
+            dot_git_dir = (local_git_dir if local_git_dir
+                           else os.path.join(workdir, '.git'))
+
+            if remote_url:
+
+                git_cmd_args.append([self.git_path, 
+                                     '--git-dir',  dot_git_dir, '--work-tree', workdir,
+                                     'remote', 'add', rmt_name, remote_url] )
+    
+                git_cmd_args.append([self.git_path, 
+                                     '--git-dir',  dot_git_dir, '--work-tree', workdir,
+                                     'commit', '--allow-empty', '-m', 'Initialize Repository'] )
+    
+
+                git_cmd_args.append([self.git_path, 
+                                     '--git-dir',  dot_git_dir, '--work-tree', workdir,
+                                     'push', '-u', f'{rmt_name}', 'main'] )
+
+                # git_cmd_args.append([self.git_path, 
+                #                      '--git-dir',  dot_git_dir, '--work-tree', local_workdir,
+                #                      'branch', f'--set-upstream-to={rmt_name}/main', 'main'])
+    
+            # git_cmd_args.append([self.git_path, 
+            #                      # '--git-dir',  dot_git_dir, '--work-tree', local_workdir, 
+            #                      '--file', os.path.join(dot_git_dir, 'config'),
+            #                      '--local', 'push.default', 'current'])
+
+            return git_cmd_args
+
+        def setup_cmdargs(self, module=None, subdir='',
+                          remote_setup=False,
+                          set_upstream=False,
+                          local_workdir=None,
+                          opts:argparse.Namespace=None,
+                          share=None, user_name=None, user_email=None,
+                          dot_git_dir=None,
+                          description=None,
+                          push=False, proj_name=None,
+                          permit=None, team_name=None,
+                          remote_name=None, source=None,
+                          add_readme=False, add_license=None,
+                          add_gitignore=None,
+                          remote_url=None,
+                          local_git_dir=None,
+                          protocol=None, account=None, rmtext='.git',
+                          git_cmd_args=[]):
+
+            buf = self.init_local_cmdargs(module=module,
+                                          subdir=subdir,
+                                          local_workdir=local_workdir,
+                                          opts=opts, share=share,
+                                          git_cmd_args=git_cmd_args)
+
+            buf = self.config_minimum_cmdargs(module=module,
+                                              subdir=subdir,
+                                              local_workdir=local_workdir,
+                                              opts=opts,
+                                              user_name=user_name,
+                                              user_email=user_email,
+                                              dot_git_dir=dot_git_dir,
+                                              git_cmd_args=git_cmd_args)
+
+            f_remote_setup = (opts.git_remote_setup
+                              if (hasattr(opts, 'git_remote_setup')
+                                  and opts.git_remote_setup is not None) else remote_setup)
+
+            f_set_upstream = (opts.git_set_upstream
+                              if (hasattr(opts, 'git_set_upstream')
+                                  and opts.git_set_upstream is not None) else set_upstream)
+            if f_remote_setup:
+                buf = self.create_remote_repo_cmdargs(module=module, subdir=subdir,
+                                                      opts=opts, description=description,
+                                                      push=push, proj_name=proj_name,
+                                                      share=share, permit=permit,
+                                                      team_name=team_name,
+                                                      remote_name=remote_name, source=source,
+                                                      add_readme=add_readme, add_license=add_license,
+                                                      add_gitignore=add_gitignore,
+                                                      git_cmd_args=git_cmd_args)
+
+            if f_set_upstream:
+                buf = self.set_upstream_cmdargs(module=module, subdir=subdir,
+                                                local_workdir=local_workdir,
+                                                opts=opts, remote_url=remote_url,
+                                                local_git_dir=local_git_dir,
+                                                remote_name=remote_name,
+                                                protocol=protocol, account=account,
+                                                rmtext=rmtext, git_cmd_args=git_cmd_args)
+            
+            return buf
+        
+
+        def setup(self, module=None, subdir='',
+                  remote_setup=False,
+                  set_upstream=False,
+                  local_workdir=None,
+                  opts:argparse.Namespace=None,
+                  share=None, user_name=None, user_email=None,
+                  dot_git_dir=None,
+                  description=None,
+                  push=False, proj_name=None,
+                  permit=None, team_name=None,
+                  remote_name=None, source=None,
+                  add_readme=False, add_license=None,
+                  add_gitignore=None,
+                  remote_url=None,
+                  local_git_dir=None,
+                  protocol=None, account=None, rmtext='.git',
+                  verbose:bool=None, dry_run:bool=None,
+                  check:bool=True, text:bool=True, hook=None,
+                  more_upper:bool=False, encoding=None, **args):
+
+            cmdargs = self.setup_cmdargs(module=module,
+                                         subdir=subdir,
+                                         remote_setup=remote_setup,
+                                         set_upstream=set_upstream,
+                                         local_workdir=local_workdir,
+                                         opts=opts, share=share,
+                                         user_name=user_name, user_email=user_email,
+                                         dot_git_dir=dot_git_dir,
+                                         description=description,
+                                         push=push, proj_name=proj_name,
+                                         permit=permit, team_name=team_name,
+                                         remote_name=remote_name, source=source,
+                                         add_readme=add_readme, add_license=add_license,
+                                         add_gitignore=add_gitignore,
+                                         remote_url=remote_url,
+                                         local_git_dir=local_git_dir,
+                                         protocol=protocol, account=account, rmtext=rmtext,
+                                         git_cmd_args=[])
+
+            f_verbose = (opts.verbose if (hasattr(opts, 'verbose')
+                                          and opts.verbose is not None) else verbose)
+
+            f_dry_run = (opts.dry_run if (hasattr(opts, 'dry_run')
+                                          and opts.dry_run is not None) else
+                         (opts.dryrun if (hasattr(opts, 'dryrun')
+                                          and opts.dryrun is not None) else dry_run))
+
+            self.invoke(cmdargs=cmdargs, verbose=f_verbose, dry_run=f_dry_run,
+                        check=check, text=text, hook=hook,
+                        more_upper=more_upper, encoding=encoding, **args)
+
+    
     def manage_env(self, args:argparse.Namespace, rest:list=[]):
 
         subcmd      = args.subcommand if hasattr(args, 'subcommand') else 'unknown'
@@ -952,12 +2152,6 @@ class PyEncase(object):
         modules   = args.module      if hasattr(args, 'module')     else []
         scrptlibs = args.script_lib  if hasattr(args, 'script_lib') else []
         scripts   = args.scriptnames if hasattr(args, 'scriptnames') else []
-
-
-        git_user   = args.git_user               if hasattr(args, 'git_user')         else None
-        git_email  = args.git_email              if hasattr(args, 'git_email')        else None
-        git_url    = args.git_remote_url         if hasattr(args, 'git_remote_url')   else None
-        git_origin = (not args.git_set_upstream) if hasattr(args, 'git_set_upstream') else True
 
         if hasattr(args, 'std_script_lib') and args.std_script_lib:
             for _scrlib in self.__class__.SCRIPT_STD_LIB.keys():
@@ -1008,9 +2202,16 @@ class PyEncase(object):
                                              encoding=self.encoding, dry_run=flg_dry_run, verbose=flg_verbose)
             
                 self.put_gitkeep(dry_run=flg_dry_run, verbose=flg_verbose)
-                self.setup_git(git_user=git_user, git_email=git_email, git_url=git_url,
-                               verbose=flg_verbose, dry_run=flg_dry_run, origin=git_origin)
+                # self.setup_git(git_user=git_user, git_email=git_email, git_url=git_url,
+                #                verbose=flg_verbose, dry_run=flg_dry_run, remote_name=git_origin)
 
+                gitif = self.__class__.GitIF(opts=args,
+                                             local_path=self.prefix,
+                                             verbose=flg_verbose, dry_run=flg_dry_run,
+                                             encoding=self.encoding)
+                ret = gitif.setup(module=None, subdir='',
+                                  local_workdir=self.prefix,
+                                  verbose=flg_verbose, dry_run=flg_dry_run, opts=args)
 
         if flg_readme:
 
@@ -1029,10 +2230,93 @@ class PyEncase(object):
         if len(modules)>0:
             self.run_pip(subcmd='install', args=modules, verbose=flg_verbose, dry_run=flg_dry_run)
 
+    def manage_readme(self, args:argparse.Namespace, rest:list=[]):
+        subcmd = args.subcommand if hasattr(args, 'subcommand') else 'unknown'
+
+        bin_scr, lib_scr = self.list_categorized_pkg_scripts()
+
+        flg_verbose = args.verbose if hasattr(args, 'verbose') else self.verbose
+        flg_dry_run = args.dry_run if hasattr(args, 'dry_run') else False
+        flg_backup  = args.backup  if hasattr(args, 'backup')  else False
+
+        flg_git = os.path.exists(os.path.join(self.prefix, '.gitignore'))
+
+        title      = ( args.title if (hasattr(args, 'title') and args.title )
+                       else str(pathlib.Path(self.prefix).name))
+
+        keyword_buf = {}
+        keyword_buf.update(self.__class__.FILENAME_DEFAULT)
+        keyword_buf.update({
+            '____TITLE____':              title,
+            '____MNGSCRIPT_NAME____':     self.__class__.MNG_SCRIPT,
+            '____AUTHOR_NAME____':        self.__class__.guess_git_username(),
+            '____AUTHOR_EMAIL____':       self.__class__.guess_git_useremail(),
+            '____py_shebang_pattern____': self.python_shebang,
+        })
+
+        readme_path = self.update_readme(keywords=keyword_buf,
+                                         bin_basenames=[x.removesuffix('.py') for x in bin_scr],
+                                         lib_basenames=[x.removesuffix('.py') for x in lib_scr],
+                                         flg_git=flg_git, backup=flg_backup,
+                                         verbose=flg_verbose, dry_run=flg_dry_run)
+        
+    def manage_git(self, args:argparse.Namespace, rest:list=[]):
+        subcmd = args.subcommand if hasattr(args, 'subcommand') else 'unknown'
+        flg_verbose = args.verbose if hasattr(args, 'verbose') else self.verbose
+        flg_dry_run = args.dry_run if hasattr(args, 'dry_run') else False
+        if hasattr(args, 'git_command') and (args.git_command is not None):
+            self.set_git_path(git_cmd=args.git_command)
+
+        flg_module_source = ( hasattr(args, 'module_src') and args.module_src )
+
+        work_top = os.path.join(self.srcdir, args.module_src) if flg_module_source else self.prefix 
+
+        if (not os.path.exists(work_top)) or (not os.path.isdir(work_top)):
+            self.stderr.write("ERROR: Directory not found : ", work_top)
+            return 
+
+        if not flg_module_source:
+            self.make_gitignore_contents(os.path.join(self.prefix, '.gitignore'),
+                                         encoding=self.encoding, dry_run=flg_dry_run, verbose=flg_verbose)
+                
+            self.put_gitkeep(dry_run=flg_dry_run, verbose=flg_verbose)
+            gitif = self.__class__.GitIF(opts=args,
+                                         local_path=self.prefix,
+                                         verbose=flg_verbose, dry_run=flg_dry_run,
+                                         encoding=self.encoding)
+            ret = gitif.setup(module=None, subdir='',
+                              local_workdir=self.prefix,
+                              verbose=flg_verbose, dry_run=flg_dry_run, opts=args)
+            return
+
+        module_name     = args.module_src
+        module_dir      = os.path.join(self.srcdir, module_name)
+        module_test_dir = os.path.join(module_dir, 'test')
+        module_gitif = self.__class__.GitIF(opts=args,
+                                            local_path=self.srcdir,
+                                            verbose=flg_verbose, dry_run=flg_dry_run,
+                                            encoding=self.encoding)
+
+        self.put_gitkeep(dest_dirs=[module_test_dir], dry_run=flg_dry_run, verbose=flg_verbose)
+
+        module_gitignore = os.path.join(module_dir, '.gitignore')
+        str_format = {}
+        str_format.update(self.__class__.FILENAME_DEFAULT)
+
+        # text_filter = self.__class__.EmbeddedText.FormatFilter(format_variables=str_format)
+        self.make_gitignore_contents(output_path=module_gitignore,
+                                     git_keepdirs=[],
+                                     template_s_marker=r'\s*#{5,}\s*____MODULE_DOT_GITIGNORE_TEMPLATE_START____\s*#{5,}',
+                                     templete_e_marker=r'\s*#{5,}\s*____MODULE_DOT_GITIGNORE_TEMPLATE_END____\s*#{5,}',
+                                     dry_run=flg_dry_run, verbose=flg_verbose, format_alist=str_format)
+
+        ret = module_gitif.setup(module=module_name, subdir='',
+                                 verbose=flg_verbose, dry_run=flg_dry_run, opts=args)
+        return
 
     def setup_newmodule(self, args:argparse.Namespace, rest:list=[]):
 
-        subcmd      = args.subcommand if hasattr(args, 'subcommand') else 'unknown'
+        subcmd = args.subcommand if hasattr(args, 'subcommand') else 'unknown'
 
         self.set_python_path(python_cmd=(args.python if (hasattr(args, 'python') and
                                                          args.python is not None) else self.python_select),
@@ -1044,11 +2328,11 @@ class PyEncase(object):
 
         module_src_top = self.srcdir
 
-        if hasattr(args, 'git_command') and (args.git is not None):
+        if hasattr(args, 'git_command') and (args.git_command is not None):
             self.set_git_path(git_cmd=args.git_command)
 
-        verbose = args.verbose if hasattr(args, 'verbose') else self.verbose
-        dry_run = args.dry_run if hasattr(args, 'dry_run') else False
+        flg_verbose = args.verbose if hasattr(args, 'verbose') else self.verbose
+        flg_dry_run = args.dry_run if hasattr(args, 'dry_run') else False
 
         flg_readme = args.readme if hasattr(args, 'readme') else True
         flg_git    = args.git    if hasattr(args, 'git')    else True
@@ -1057,18 +2341,14 @@ class PyEncase(object):
 
         newmodule_shebang = self.python_shebang if flg_set_shebang else self.__class__.SHEBANG_DEFAULT
 
-        git_user    = args.git_user               if hasattr(args, 'git_user')         else None
-        git_email   = args.git_email              if hasattr(args, 'git_email')        else None
+        newmodule_gitif = self.__class__.GitIF(opts=args,
+                                               local_path=self.srcdir,
+                                               verbose=flg_verbose, dry_run=flg_dry_run,
+                                               encoding=self.encoding)
 
-        git_protocol = args.git_protocol          if hasattr(args, 'git_protocol')     else 'ssh'
-
-        git_url     = args.git_remote_url         if hasattr(args, 'git_remote_url')   else None
-        git_origin  = (not args.git_set_upstream) if hasattr(args, 'git_set_upstream') else True
-
+        git_user, git_email = newmodule_gitif.userinfo
 
         module_website = args.module_website      if hasattr(args, 'module_website')   else []
-        git_hosting = args.git_hosting            if hasattr(args, 'git_hosting')      else None
-        git_account = args.gitxxb_account         if hasattr(args, 'gitxxb_account')   else None
 
         title       = args.title       if hasattr(args, 'title')       else ""
         description = args.title       if hasattr(args, 'description') else ""
@@ -1076,20 +2356,23 @@ class PyEncase(object):
         clsnames     = args.class_name  if hasattr(args, 'class_name')  else []
         req_modules  = args.module      if hasattr(args, 'module')      else []
 
-        module_keywords = args.keywords     if hasattr(args, 'keywords')     else []
-        classifiers     = args.classifiers  if hasattr(args, 'classifiers')  else []
-        author_name     = args.author_name  if hasattr(args, 'author_name')  else []
-        author_email    = args.author_email if hasattr(args, 'author_email') else []
+        module_keywords  = args.keywords     if hasattr(args, 'keywords')     else []
+        classifiers      = args.classifiers  if hasattr(args, 'classifiers')  else []
+        author_name      = args.author_name  if hasattr(args, 'author_name')  else []
+        author_email     = args.author_email if hasattr(args, 'author_email') else []
         maintainer_name  = args.maintainer_name  if hasattr(args, 'maintainer_name')  else []
         maintainer_email = args.maintainer_email if hasattr(args, 'maintainer_email') else []
-        create_year     = args.create_year  if hasattr(args, 'create_year')  else [ datetime.date.today().year ]
-
-
+        create_year      = args.create_year  if hasattr(args, 'create_year')  else [ datetime.date.today().year ]
+        
+        # if len(author_name)==0:
+        #     author_name.append(git_user if isinstance(git_user,str) and git_user else self.__class__.guess_git_username())
+        # if len(author_email)==0:
+        #     author_email.append(git_email if isinstance(git_email,str) and git_email else self.__class__.guess_git_useremail())
+            
         if len(author_name)==0:
-            author_name.append(git_user if isinstance(git_user,str) and git_user else self.__class__.guess_git_username())
+            author_name.append(git_user)
         if len(author_email)==0:
-            author_email.append(git_email if isinstance(git_email,str) and git_email else self.__class__.guess_git_useremail())
-
+            author_email.append(git_email)
 
         author_text_readme    = []
         author_text_pyproject = []
@@ -1111,7 +2394,6 @@ class PyEncase(object):
                                           else "  %s(%s)\n" % (athr, eml))
             maintainer_text_pyproject.append("{name = %s, email= %s}\n" 
                                              % (repr(athr), repr(eml) if eml is not None else repr("")))
-
 
         author_text_readme    = "\n".join(author_text_readme)
         author_text_pyproject = ", ".join(author_text_pyproject)
@@ -1138,37 +2420,27 @@ class PyEncase(object):
             desc_text = "%s : %s" % (title if title else module_name, 
                                      description if description else '')
 
-            if git_url is None and git_hosting and git_account:
-                if git_hosting == 'github':
-                    if git_protocol == 'https':
-                        git_url_nm = 'https://github.com/%s/%s.git' % (git_account, module_name)
-                    else:
-                        git_url_nm = 'git@github.com:%s/%s.git' % (git_account, module_name)
-                elif git_hosting == 'gitlab':
-                    if git_protocol == 'https':
-                        git_url_nm = 'https://gitlab.com/%s/%s.git' % (git_account, module_name)
-                    else:
-                        git_url_nm = 'git@gitlab.com:%s/%s.git' % (git_account, module_name)
-                else:
-                    if git_protocol == 'https':
-                        git_url_nm = 'https://%s/%s/%s.git' % (git_hosting.removeprefix("https://"), git_account, module_name)
-                    else:
-                        git_url_nm = '%s:%s/%s.git' % (git_hosting.removeprefix("https://"), git_account, module_name)
-            elif git_url:
-                git_url_nm = git_url
-            else:
-                git_url_nm = None
+            git_url_nm = newmodule_gitif.remote_repo_url(module=module_name, subdir='', opts=args,
+                                                         protocol=None, account=None, rmtext='.git')
+
 
             if len(args.module_name)==1 and len(module_website)>0:
                 url = ",".join(module_website)
             else:
+                # url = ( module_website[nmidx] if nmidx<len(module_website)
+                #         else (git_url_nm if git_url_nm else 'https://gitxxx.com/%s/%s'
+                #               % ( git_account if git_account
+                #                   else "-".join([str(s).lower() 
+                #                                  for s in author_name[0].split(" ")]), module_name)))
                 url = ( module_website[nmidx] if nmidx<len(module_website)
                         else (git_url_nm if git_url_nm else 'https://gitxxx.com/%s/%s'
-                              % ( git_account if git_account
+                              % ( git_user if git_user
                                   else "-".join([str(s).lower() 
                                                  for s in author_name[0].split(" ")]), module_name)))
                 
-            clsnm = clsnames[nmidx] if nmidx<len(clsnames) else ("".join([ i.capitalize() for i in module_name.split("-")]))
+            # clsnm = clsnames[nmidx] if nmidx<len(clsnames) else ("".join([ i.capitalize() for i in module_name.split("-")]))
+            clsnm = clsnames[nmidx] if nmidx<len(clsnames) else (self.__class__.to_py_identifier_capitalized(module_name,
+                                                                                                             use_underscore=False))
 
             str_format = {}
             str_format.update(self.__class__.FILENAME_DEFAULT)
@@ -1201,204 +2473,81 @@ class PyEncase(object):
             for dd in [new_module_top, new_module_test_dir,
                        os.path.join(new_module_top, 'src'),
                        os.path.join(new_module_top, 'src', module_short_path)]:
-                if verbose or dry_run:
-                    sys.stderr.write("[%s.%s:%d] mkdir -p : '%s'\n" %
-                                     (self.__class__.__name__, 
-                                      inspect.currentframe().f_code.co_name,
-                                      inspect.currentframe().f_lineno, dd))
-                if not dry_run:
+                if flg_verbose or flg_dry_run:
+                    self.stderr.write("mkdir -p : '%s'" % (dd, ))
+                if not flg_dry_run:
                     os.makedirs(dd, mode=0o755, exist_ok=True)
 
             text_filter = self.__class__.EmbeddedText.FormatFilter(format_variables=str_format)
             code_filter = self.__class__.PyCodeFilter(newmodule_shebang, keyword_table=str_format)
 
             if flg_git:
-                # put gitdummy file in test directory
-                dp = os.path.join(new_module_test_dir, 
-                                  self.__class__.FILENAME_DEFAULT['____GIT_DUMMYFILE____'])
-                if os.path.exists(dp):
-                    if verbose:
-                        sys.stderr.write("[%s.%s:%d] Warning File exists : skip : '%s'\n" %
-                                         (self.__class__.__name__, 
-                                          inspect.currentframe().f_code.co_name,
-                                          inspect.currentframe().f_lineno, dp))
-                else:
-                    if verbose or dry_run:
-                        sys.stderr.write("[%s.%s:%d] put %s in '%s'\n" %
-                                         (self.__class__.__name__, 
-                                          inspect.currentframe().f_code.co_name,
-                                          inspect.currentframe().f_lineno,
-                                          self.__class__.FILENAME_DEFAULT['____GIT_DUMMYFILE____'], new_module_test_dir))
-
-                    if not dry_run:
-                        pathlib.Path(dp).touch(mode=0o644, exist_ok=True)
+                self.put_gitkeep(dest_dirs=[new_module_test_dir, ], dry_run=flg_dry_run, verbose=flg_verbose)
 
                 new_module_gitignore = os.path.join(new_module_top, '.gitignore')
+                self.make_gitignore_contents(output_path=new_module_gitignore,
+                                             git_keepdirs=[],
+                                             template_s_marker=r'\s*#{5,}\s*____MODULE_DOT_GITIGNORE_TEMPLATE_START____\s*#{5,}',
+                                             templete_e_marker=r'\s*#{5,}\s*____MODULE_DOT_GITIGNORE_TEMPLATE_END____\s*#{5,}',
+                                             dry_run=flg_dry_run, verbose=flg_verbose, format_alist=str_format)
 
-                if os.path.exists(new_module_gitignore):
-                    if verbose:
-                        sys.stderr.write("[%s.%s:%d] Warning File exists : skip : '%s'\n" %
-                                         (self.__class__.__name__, 
-                                          inspect.currentframe().f_code.co_name,
-                                          inspect.currentframe().f_lineno, new_module_gitignore))
-                else:
-                    if verbose or dry_run:
-                        sys.stderr.write("[%s.%s:%d] .gitignore : '%s'\n" %
-                                         (self.__class__.__name__, 
-                                          inspect.currentframe().f_code.co_name,
-                                          inspect.currentframe().f_lineno, new_module_gitignore))
-                    if not dry_run:
-                        self.__class__.EmbeddedText.extract_to_file(outfile=new_module_gitignore, infile=None,
-                                                                    s_marker=r'\s*#{5,}\s*____MODULE_DOT_GITIGNORE_TEMPLATE_START____\s*#{5,}',
-                                                                    e_marker=r'\s*#{5,}\s*____MODULE_DOT_GITIGNORE_TEMPLATE_END____\s*#{5,}',
-                                                                    include_markers=False, multi_match=False,dedent=True, 
-                                                                    skip_head_emptyline=True, skip_tail_emptyline=True,
-                                                                    dequote=True, format_filter=text_filter, 
-                                                                    open_mode='w', encoding=self.encoding)
-                        os.chmod(new_module_gitignore, mode=0o644)
-
-
-
-                dot_git_path = os.path.join(new_module_top, '.git')
-                if os.path.exists(dot_git_path):
-                    if verbose:
-                        sys.stderr.write("[%s.%s:%d] : Directory already exists: '%s'\n" %
-                                         (self.__class__.__name__, 
-                                          inspect.currentframe().f_code.co_name,
-                                          inspect.currentframe().f_lineno, dot_git_path))
-                else:
-                    git_commands = []
-                    git_commands.append([self.git_path, 'init', new_module_top])
-
-                if isinstance(git_user, str) and git_user:
-                    git_commands.append([self.git_path, 'config',
-                                         '--file', os.path.join(dot_git_path, 'config'),
-                                         'user.name', git_user])
-                elif not self.check_git_config_value(key='user.name', mode='--global'):
-                    git_commands.append([self.git_path, 'config',
-                                         '--file', os.path.join(dot_git_path, 'config'),
-                                         'user.name', getpass.getuser()])
-
-                if isinstance(git_email, str) and git_email:
-                    git_commands.append([self.git_path, 'config',
-                                         '--file', os.path.join(dot_git_path, 'config'),
-                                         'user.email', git_email])
-                elif not self.check_git_config_value(key='user.email', mode='--global'):
-                    git_commands.append([self.git_path, 'config',
-                                         '--file', os.path.join(dot_git_path, 'config'),
-                                         'user.email', getpass.getuser()+'@'+socket.gethostname()])
-            
-                if git_origin:
-                    if isinstance(git_url, str) and git_url:
-                        git_commands.append([self.git_path, 
-                                             '--git-dir', dot_git_path, '--work-tree', new_module_top, 
-                                             'remote', 'add', ('origin' if origin else 'upstream'), git_url])
-                        git_commands.append([self.git_path, 'config',
-                                             '--file', os.path.join(dot_git_path, 'config'),
-                                             'push.default', current])
-
-                for _gitcmd in git_commands:
-                    if verbose or dry_run:
-                        sys.stderr.write("[%s.%s:%d] : Exec : '%s'\n" %
-                                         (self.__class__.__name__, 
-                                          inspect.currentframe().f_code.co_name,
-                                          inspect.currentframe().f_lineno, " ".join(_gitcmd)))
-                    if not dry_run:
-                        gitcmdio = subprocess.run(_gitcmd, encoding=self.encoding, 
-                                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                        if verbose:
-                            sys.stdout.write("[%s.%s:%d] git output : '%s'\n" %
-                                             (self.__class__.__name__, 
-                                              inspect.currentframe().f_code.co_name,
-                                              inspect.currentframe().f_lineno, gitcmdio.stdout))
-                        sys.stderr.write("[%s.%s:%d] git stderr : '%s'\n" %
-                                         (self.__class__.__name__, 
-                                          inspect.currentframe().f_code.co_name,
-                                          inspect.currentframe().f_lineno, gitcmdio.stderr))
-
+                ret = newmodule_gitif.setup(module=module_name, subdir='',
+                                            verbose=flg_verbose, dry_run=flg_dry_run, opts=args)
 
             if flg_readme:
                 new_module_readme = os.path.join(new_module_top, str_format.get('____README_NAME____', 'README.md'))
+                self.extract_template_with_check(output_path=new_module_readme,
+                                                 template_s_marker=r'\s*#{5,}\s*____MODULE_README_MD_TEMPLATE_START____\s*#{5,}',
+                                                 template_e_marker=r'\s*#{5,}\s*____MODULE_README_MD_TEMPLATE_END____\s*#{5,}',
+                                                 filter_obj=text_filter, dequote=True,
+                                                 short_name='README', verbose=flg_verbose, dry_run=flg_dry_run)
                 
-                if os.path.exists(new_module_readme):
-                    if verbose:
-                        sys.stderr.write("[%s.%s:%d] Warning File exists : skip : '%s'\n" %
-                                         (self.__class__.__name__, 
-                                          inspect.currentframe().f_code.co_name,
-                                          inspect.currentframe().f_lineno, new_module_readme))
-                else:
-                    if verbose or dry_run:
-                        sys.stderr.write("[%s.%s:%d] making README file : '%s'\n" %
-                                         (self.__class__.__name__, 
-                                          inspect.currentframe().f_code.co_name,
-                                          inspect.currentframe().f_lineno, new_module_readme))
-                    if not dry_run:
-                        self.__class__.EmbeddedText.extract_to_file(outfile=new_module_readme, infile=None,
-                                                                    s_marker=r'\s*#{5,}\s*____MODULE_README_MD_TEMPLATE_START____\s*#{5,}',
-                                                                    e_marker=r'\s*#{5,}\s*____MODULE_README_MD_TEMPLATE_END____\s*#{5,}',
-                                                                    include_markers=False, multi_match=False,dedent=True, 
-                                                                    skip_head_emptyline=True, skip_tail_emptyline=True,
-                                                                    dequote=True, format_filter=text_filter, 
-                                                                    open_mode='w', encoding=self.encoding)
-                        os.chmod(new_module_readme, mode=0o644)
-
-
             text_path_templates = [('LICENSE',        'BSD_3_CLAUSE_LICENSE'), 
                                    ('Makefile',       'MODULE_DIR_MAKEFILE'), 
                                    ('pyproject.toml', 'MODULE_PYPROJECT_TOML')]
             for fname, markerid in text_path_templates:
                 lpath = os.path.join(new_module_top, fname)
-                if os.path.exists(lpath):
-                    if verbose:
-                        sys.stderr.write("[%s.%s:%d] Warning File exists : skip : '%s'\n" %
-                                         (self.__class__.__name__, 
-                                          inspect.currentframe().f_code.co_name,
-                                          inspect.currentframe().f_lineno, lpath))
-                    continue
-
-                if verbose or dry_run:
-                    sys.stderr.write("[%s.%s:%d] making %s file : '%s'\n" %
-                                     (self.__class__.__name__, 
-                                      inspect.currentframe().f_code.co_name,
-                                    inspect.currentframe().f_lineno, fname, lpath))
-                if not dry_run:
-                    self.__class__.EmbeddedText.extract_to_file(outfile=lpath, infile=None,
-                                                                s_marker=r'\s*#{5,}\s*____'+markerid+r'_TEMPLATE_START____\s*#{5,}',
-                                                                e_marker=r'\s*#{5,}\s*____'+markerid+r'_TEMPLATE_END____\s*#{5,}',
-                                                                include_markers=False, multi_match=False,dedent=True, 
-                                                                skip_head_emptyline=True, skip_tail_emptyline=True,
-                                                                dequote=True, format_filter=text_filter, 
-                                                                open_mode='w', encoding=self.encoding)
-                    os.chmod(lpath, mode=0o644)
+                self.extract_template_with_check(output_path=lpath,
+                                                 template_s_marker=r'\s*#{5,}\s*____'+markerid+'_TEMPLATE_START____\s*#{5,}',
+                                                 template_e_marker=r'\s*#{5,}\s*____'+markerid+'_TEMPLATE_END____\s*#{5,}',
+                                                 filter_obj=text_filter, dequote=True,
+                                                 short_name=fname, verbose=flg_verbose, dry_run=flg_dry_run)
 
             code_path_template = [('__init__.py',           'MODULE_SRC_INIT_PY'),
                                   (module_short_path+'.py' ,'MODULE_SRC_MODULE_NAME_PY')]
 
             for fname, markerid in code_path_template:
                 lpath = os.path.join(new_module_top, 'src', module_short_path, fname)
-                if os.path.exists(lpath):
-                    if verbose:
-                        sys.stderr.write("[%s.%s:%d] : Warning: File already exists (Skipped) : '%s'\n" %
-                                         (self.__class__.__name__, 
-                                          inspect.currentframe().f_code.co_name,
-                                          inspect.currentframe().f_lineno, lpath))
-                    continue
+                self.extract_template_with_check(output_path=lpath,
+                                                 template_s_marker=r'\s*#{5,}\s*____'+markerid+'_TEMPLATE_START____\s*#{5,}',
+                                                 template_e_marker=r'\s*#{5,}\s*____'+markerid+'_TEMPLATE_END____\s*#{5,}',
+                                                 filter_obj=code_filter, dequote=False,
+                                                 short_name=fname, verbose=flg_verbose, dry_run=flg_dry_run)
 
-                if verbose or dry_run:
-                    sys.stderr.write("[%s.%s:%d] : Preparing %s from template : '%s'\n" %
-                                     (self.__class__.__name__, 
-                                      inspect.currentframe().f_code.co_name,
-                                      inspect.currentframe().f_lineno, fname, lpath))
+
+    def extract_template_with_check(self, output_path,
+                                    template_s_marker,
+                                    template_e_marker,
+                                    filter_obj, dequote,
+                                    short_name=None, verbose=False, dry_run=False):
+        fname = short_name if short_name else os.path.basename(output_path)
+        if os.path.exists(output_path):
+            if verbose:
+                self.stderr.write("Warning: File already exists (Skipped) : '%s'" % (output_path, ))
+            return
+
+        if verbose or dry_run:
+            self.stderr.write("Preparing %s from template : '%s'" % (fname, output_path))
                 
-                if not dry_run:
-                    self.__class__.EmbeddedText.extract_to_file(outfile=lpath, infile=None,
-                                                                s_marker=r'\s*#{5,}\s*____'+markerid+'_TEMPLATE_START____\s*#{5,}',
-                                                                e_marker=r'\s*#{5,}\s*____'+markerid+'_TEMPLATE_END____\s*#{5,}',
-                                                                include_markers=False, multi_match=False,dedent=True, 
-                                                                skip_head_emptyline=True, skip_tail_emptyline=True,
-                                                                dequote=False, format_filter=code_filter, 
-                                                                open_mode='w', encoding=self.encoding)
-                    os.chmod(lpath, mode=0o644)
+        if not dry_run:
+            self.__class__.EmbeddedText.extract_to_file(outfile=output_path, infile=None,
+                                                        s_marker=template_s_marker,
+                                                        e_marker=template_e_marker,
+                                                        include_markers=False, multi_match=False, dedent=True, 
+                                                        skip_head_emptyline=True, skip_tail_emptyline=True,
+                                                        dequote=dequote, format_filter=filter_obj, 
+                                                        open_mode='w', encoding=self.encoding)
+            os.chmod(output_path, mode=0o644)
 
     def update_readme(self, keywords={}, bin_basenames=[], lib_basenames=[],
                       flg_git=False, backup=False, verbose=False, dry_run=False):
@@ -1418,10 +2567,7 @@ class PyEncase(object):
                                                                   dry_run=dry_run)
             if readme_bkup is None:
                 if verbose or dry_run:
-                    sys.stderr.write("[%s.%s:%d] : Save Readme file : '%s'\n" %
-                                     (self.__class__.__name__, 
-                                      inspect.currentframe().f_code.co_name,
-                                      inspect.currentframe().f_lineno, readme_path))
+                    self.stderr.write("Save Readme file : '%s'" % (readme_path, ))
                 if not dry_run:
                     readme_updater.save_readme_contents(output=readme_path, format_alist=keywords)
             else:
@@ -1430,13 +2576,34 @@ class PyEncase(object):
                                                verbose=verbose, dry_run=dry_run)
         else:
             if verbose or dry_run:
-                sys.stderr.write("[%s.%s:%d] : Save Readme file : '%s'\n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno, readme_path))
+                self.stderr.write("Save Readme file : '%s'" % (readme_path, ))
             if not dry_run:
                 readme_updater.save_readme_contents(output=readme_path, format_alist=keywords)
 
+    @classmethod
+    def to_py_identifier_capitalized(cls, s:str, use_underscore:bool=True)->str:
+        chanks   = cls.NON_ASCII_PATTERN.split(s)
+        catchank = ('_' if use_underscore else '').join(word.capitalize() for word in chanks if word)
+        if not catchank:
+            catchank = "___"
+        if catchank[0].isdigit():
+            catchank = "___" + catchank
+        if keyword.iskeyword(catchank):
+            catchank += "___"
+        return catchank
+    
+    @classmethod
+    def to_py_identifier(cls, s:str, lowercase:bool=True) -> str:
+        chanks = cls.NON_ASCII_PATTERN.sub('_', s)
+        if lowercase:
+            chanks = chanks.lower()
+        if not chanks:
+            chanks = "___"
+        if chanks[0].isdigit():
+            chanks = "___" + chanks
+        if keyword.iskeyword(chanks):
+            chanks += "___"
+        return chanks
 
     def add_pyscr(self, basename, keywords={}, verbose=False, dry_run=False):
         if isinstance(basename, list):
@@ -1446,19 +2613,19 @@ class PyEncase(object):
 
         scr_path = os.path.join(self.python_path, basename+'.py')
         if os.path.exists(scr_path):
-            sys.stderr.write("[%s.%s:%d] : Warning: File already exists (Skipped) : '%s'\n" %
-                             (self.__class__.__name__, 
-                              inspect.currentframe().f_code.co_name,
-                              inspect.currentframe().f_lineno, scr_path))
+            self.stderr.write("Warning: File already exists (Skipped) : '%s'" % (scr_path, ))
         else:
             if verbose or dry_run:
-                sys.stderr.write("[%s.%s:%d] : Preparing python library file from template : '%s'\n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno, scr_path))
+                self.stderr.write("Preparing python library file from template : '%s'" % (scr_path, ))
                 
             if not dry_run:
-                str_format={'____SCRIPT_NAME____': basename if basename.endswith('.py') else basename+'.py'}
+                str_format = {
+                    '____SCRIPT_NAME____':                basename if basename.endswith('.py') else basename+'.py',
+                    '____SCRIPT_SYMBOLIZED____' :         self.__class__.to_py_identifier(basename.removesuffix('.py'),
+                                                                                          lowercase=True),
+                    '____SCRIPT_CAPITAL_SYMBOLIZED____' : self.__class__.to_py_identifier_capitalized(basename.removesuffix('.py'),
+                                                                                                      use_underscore=False),
+                }
                 str_format.update(keywords)
 
                 code_filter = self.__class__.PyCodeFilter(self.python_shebang, keyword_table=str_format)
@@ -1475,10 +2642,7 @@ class PyEncase(object):
 
         bin_path = os.path.join(self.bindir, basename)
         if os.path.exists(bin_path):
-            sys.stderr.write("[%s.%s:%d] : Warning: File already exists (Skipped) : '%s'\n" %
-                             (self.__class__.__name__, 
-                              inspect.currentframe().f_code.co_name,
-                              inspect.currentframe().f_lineno, bin_path))
+            self.stderr.write("Warning: File already exists (Skipped) : '%s'" % (bin_path, ))
         else:
             self.mksymlink_this_in_structure(basename, strip_py=True,
                                              dry_run=dry_run, verbose=verbose)
@@ -1492,16 +2656,10 @@ class PyEncase(object):
 
         scr_path = os.path.join(self.python_path, basename+'.py')
         if os.path.exists(scr_path):
-            sys.stderr.write("[%s.%s:%d] : Warning: File already exists (Skipped) : '%s'\n" %
-                             (self.__class__.__name__, 
-                              inspect.currentframe().f_code.co_name,
-                              inspect.currentframe().f_lineno, scr_path))
+            self.stderr.write("Warning: File already exists (Skipped) : '%s'" % (scr_path, ))
         else:
             if verbose or dry_run:
-                sys.stderr.write("[%s.%s:%d] : Preparing python library file from template : '%s'\n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno, scr_path))
+                self.stderr.write("Preparing python library file from template : '%s'" % (scr_path, ))
                 
             gen_fuction = self.__class__.SCRIPT_STD_LIB.get(basename,{}).get('creator')
 
@@ -1523,27 +2681,27 @@ class PyEncase(object):
                                                                 open_mode='w', encoding=self.encoding)
 
     def make_gitignore_contents(self, output_path,
+                                git_keepdirs=None,
+                                template_s_marker=None,
+                                templete_e_marker=None,
                                 dry_run=False, verbose=False, format_alist={}, **format_args):
 
         if os.path.exists(output_path):
             if verbose:
-                sys.stderr.write("[%s.%s:%d] Warning File exists : skip : '%s'\n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno, output_path))
+                self.stderr.write("Warning File exists : skip : '%s'" % (output_path, ))
             return
 
         if verbose or dry_run:
-            sys.stderr.write("[%s.%s:%d] .gitignore : '%s'\n" %
-                             (self.__class__.__name__, 
-                              inspect.currentframe().f_code.co_name,
-                              inspect.currentframe().f_lineno, output_path))
+            self.stderr.write("gitignore : '%s'" % (output_path, ))
         if not dry_run:
             str_format={'____GIT_DUMMYFILE____': 
                         self.__class__.FILENAME_DEFAULT['____GIT_DUMMYFILE____'] }
 
             str_format['____GIT_INGORE_DIRS____'] = ""
-            for _gitkpdir in self.git_keepdirs:
+
+            keepdirs = git_keepdirs if isinstance(git_keepdirs, (list,tuple)) else self.git_keepdirs
+
+            for _gitkpdir in keepdirs:
                 str_format['____GIT_INGORE_DIRS____'] += ("%s/*\n" % (_gitkpdir, ))
             str_format['____GIT_INGORE_DIRS____'].rstrip()
             str_format.update(format_alist)
@@ -1551,9 +2709,12 @@ class PyEncase(object):
             
             text_filter = self.__class__.EmbeddedText.FormatFilter(format_variables=str_format)
 
+            tmplt_s_mrkr = template_s_marker if template_s_marker else r'\s*#{5,}\s*____GITIGNORE_TEMPLATE_START____\s*#{5,}'
+            tmplt_e_mrkr = templete_e_marker if template_s_marker else r'\s*#{5,}\s*____GITIGNORE_TEMPLATE_END____\s*#{5,}'
+
             self.__class__.EmbeddedText.extract_to_file(outfile=output_path, infile=None,
-                                                        s_marker=r'\s*#{5,}\s*____GITIGNORE_TEMPLATE_START____\s*#{5,}',
-                                                        e_marker=r'\s*#{5,}\s*____GITIGNORE_TEMPLATE_END____\s*#{5,}',
+                                                        s_marker=tmplt_s_mrkr,
+                                                        e_marker=tmplt_e_mrkr,
                                                         include_markers=False, multi_match=False,dedent=True, 
                                                         skip_head_emptyline=True, skip_tail_emptyline=True,
                                                         dequote=True, format_filter=text_filter, 
@@ -1561,23 +2722,18 @@ class PyEncase(object):
             os.chmod(output_path, mode=0o644)
 
 
-    def put_gitkeep(self, dry_run=False, verbose=False):
-        for d in self.git_keepdirs: # not self.pip_dir_list():
+    def put_gitkeep(self, dest_dirs=None, dry_run=False, verbose=False):
+        dests = dest_dirs if isinstance(dest_dirs, (list, tuple)) else self.git_keepdirs
+        for d in dests: # not self.pip_dir_list():
             dp = os.path.join(d, self.__class__.FILENAME_DEFAULT['____GIT_DUMMYFILE____'])
             
             if os.path.exists(dp):
                 if verbose:
-                    sys.stderr.write("[%s.%s:%d] Warning File exists : skip : '%s'\n" %
-                                     (self.__class__.__name__, 
-                                      inspect.currentframe().f_code.co_name,
-                                      inspect.currentframe().f_lineno, dp))
+                    self.stderr.write("Warning File exists : skip : '%s'" % (dp, ))
                 continue
             if verbose or dry_run:
-                sys.stderr.write("[%s.%s:%d] put %s in '%s'\n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno,
-                                  self.__class__.FILENAME_DEFAULT['____GIT_DUMMYFILE____'], d))
+                self.stderr.write("put %s in '%s'" %
+                                  (self.__class__.FILENAME_DEFAULT['____GIT_DUMMYFILE____'], d))
             if not dry_run:
                 pathlib.Path(dp).touch(mode=0o644, exist_ok=True)
 
@@ -1649,10 +2805,8 @@ class PyEncase(object):
                 else:
                     msg = "Read from file: '%s'"   % (in_file)
 
-                sys.stderr.write("[%s.%s:%d] Read from text: '%s'\n" %
-                                 (self.__class__.__name__, 
-                                  inspect.currentframe().f_code.co_name,
-                                  inspect.currentframe().f_lineno, msg))
+                self.ref_pycan.stderr.write("Read from text: '%s'" % (msg, ))
+
             fin = (io.StringIO(initial_value=in_text, encoding=encoding) 
                    if in_file is None else open(in_file, encoding=encoding) )
             fout = (io.StringIO(encoding=encoding)
@@ -2119,8 +3273,6 @@ if __name__=='__main__':
 
         ############# ____GITIGNORE_TEMPLATE_END____ #######################
 
-
-
         ############# ____README_TEMPLATE_START____ #######################
     
         """
@@ -2204,34 +3356,39 @@ if __name__=='__main__':
         import tzlocal
         
         #import pkgstruct
+
+        class ____SCRIPT_CAPITAL_SYMBOLIZED____(object):
+
+            def __init__(self):
+                pass
         
-        def main():
-            """
-            ____SCRIPT_NAME____
-            Example code skeleton: Just greeting
-            """
-            argpsr = argparse.ArgumentParser(description='Example: showing greeting words')
-            argpsr.add_argument('name', nargs='*', type=str, default=['World'],  help='your name')
-            argpsr.add_argument('-d', '--date', action='store_true', help='Show current date & time')
-            args = argpsr.parse_args()
-            if args.date:
-                tz_local = tzlocal.get_localzone()
-                datestr  = datetime.datetime.now(tz=tz_local).strftime(" It is \"%c.\"")
-            else:
-                datestr = ''
+            def main(self, args=sys.argv):
+                """
+                ____SCRIPT_NAME____
+                Example code skeleton: Just greeting
+                """
+                argpsr = argparse.ArgumentParser(description='Example: showing greeting words')
+                argpsr.add_argument('name', nargs='*', type=str, default=['World'],  help='your name')
+                argpsr.add_argument('-d', '--date', action='store_true', help='Show current date & time')
+                args = argpsr.parse_args(args)
+                if args.date:
+                    tz_local = tzlocal.get_localzone()
+                    datestr  = datetime.datetime.now(tz=tz_local).strftime(" It is \"%c.\"")
+                else:
+                    datestr = ''
         
-            print("Hello, %s!%s" % (' '.join(args.name), datestr))
-            print("Python : %d.%d.%d " % sys.version_info[0:3]+ "(%s)" % sys.executable)
-            hdr_str = "Python path: "
-            for i,p in enumerate(sys.path):
-                print("%-2d : %s" % (i+1, p))
-                hdr_str = ""
-        
-            #pkg_info   = pkgstruct.PkgStructure(script_path=sys.argv[0])
-            #pkg_info.dump(relpath=False, with_seperator=True)
+                print("Hello, %s!%s" % (' '.join(args.name), datestr))
+                print("Python : %d.%d.%d " % sys.version_info[0:3]+ "(%s)" % sys.executable)
+                hdr_str = "Python path: "
+                for i,p in enumerate(sys.path):
+                    print("%-2d : %s" % (i+1, p))
+                    hdr_str = ""
+            
+                #pkg_info   = pkgstruct.PkgStructure(script_path=sys.argv[0])
+                #pkg_info.dump(relpath=False, with_seperator=True)
         
         if __name__ == '__main__':
-            main()
+            ____SCRIPT_CAPITAL_SYMBOLIZED____().main()
 
         ########## ____PY_MAIN_TEMPLATE_END____ ##########
 
