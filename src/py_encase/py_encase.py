@@ -27,7 +27,7 @@ import keyword
 
 class PyEncase(object):
 
-    VERSION          = '0.0.10'
+    VERSION          = '0.0.11'
     PIP_MODULE_NAME  = 'py-encase'
     ENTYTY_FILE_NAME = pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name
     #    ENTYTY_FILE_NAME = pathlib.Path(__file__).resolve().name
@@ -209,7 +209,14 @@ class PyEncase(object):
             else:
                 prog = ' '.join([os.path.basename(self.path_invoked.name), self.MNG_OPT])
                 
-            argprsrm = argparse.ArgumentParser(prog=prog, add_help=False, exit_on_error=False)
+            class CustomHelpFormatter(argparse.HelpFormatter):
+                def __init__(self, prog, indent_increment=4,
+                             max_help_position=(shutil.get_terminal_size()[0]/2),
+                             width=shutil.get_terminal_size()[0]):
+                    super().__init__(prog, indent_increment, max_help_position, width)
+
+            argprsrm = argparse.ArgumentParser(prog=prog, formatter_class=CustomHelpFormatter,
+                                               add_help=False, exit_on_error=False)
 
             argprsrm.add_argument('-p', '--prefix',  default=None, help=('prefix of the directory tree. ' +
                                                                          '(Default: Grandparent directory' +
@@ -952,7 +959,7 @@ class PyEncase(object):
             rmlist.append(self.tmpdir)
             
         if flg_verbose or flg_dry_run:
-            self.stderr.write("s : '%s'" % (subcmd, ", ".join(rmlist)))
+            self.stderr.write("s : '%s'" % (subcmd, ", ".join([str(x) for x in rmlist])))
         for pdir in rmlist:
             self.__class__.remove_dircontents(path_dir=pdir, 
                                               dir_itself=False,
@@ -3123,7 +3130,7 @@ class PyEncase(object):
                                                str_format['____MNGSCRIPT_NAME____']),
                                   "Symblic link to '"
                                   +str_format['____SHSCRIPT_ENTITY_NAME____']
-                                  +" for installing Python modules by pip locally."])
+                                  +"' for installing Python modules by pip locally."])
             contents_list.append([os.path.join(str_format['____BIN_PATH____'],
                                                str_format['____SHSCRIPT_ENTITY_NAME____']),
                                   "Wrapper python script to invoke Python script. (Entity)"])
