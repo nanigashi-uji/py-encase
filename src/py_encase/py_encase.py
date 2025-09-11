@@ -2,6 +2,7 @@
 # -*- coding: utf-8; mode: python; -*-
 
 import sys
+import _io
 import os
 import datetime
 import pathlib
@@ -26,7 +27,7 @@ import keyword
 
 class PyEncase(object):
 
-    VERSION          = '0.0.8'
+    VERSION          = '0.0.9'
     PIP_MODULE_NAME  = 'py-encase'
     ENTYTY_FILE_NAME = pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name
     #    ENTYTY_FILE_NAME = pathlib.Path(__file__).resolve().name
@@ -64,75 +65,14 @@ class PyEncase(object):
                            'SSH_COMMAND'   : 'ssh',
                            'REMOTE_ALIAS'  : 'origin'}
 
-    class StreamExtd(object):
-        """
-        Extended Stream Interface
-        """
-        class StreamIF(object):
-            """
-            Wrapper for stdout/stderr to show with full qualified function name
-            """
-            def __init__(self, stream=sys.stderr):
-                self.stream      = stream
-                
-            def write(self, text='', *args, clsname=None, more_upper=False):
-                refname,lineno = self.ana_caller_fqn(clsname=clsname, more_upper=more_upper)
-                tmplt = "[%%s:%%d] %s\n" % (text, )
-                return self.stream.write(tmplt % ((refname, lineno)
-                                                  + (args if isinstance(args, tuple) else (args,) )))
-        
-            def ana_caller_fqn(self, clsname=None, more_upper=False):
-                try:
-                    if more_upper:
-                        frm = inspect.currentframe().f_back.f_back.f_back
-                    else:
-                        frm = inspect.currentframe().f_back.f_back
-        
-                    mod_name = frm.f_globals.get('__name__', '')
-                    code = frm.f_code
-        
-                    if sys.version_info >= (3, 11):
-                        qualname = code.co_qualname
-                    else:
-                        if clsname:
-                            qualname = clsname + '.' + code.co_name
-                        else:
-                            prntobj = frm.f_locals.get('self') or frm.f_locals.get('cls')
-                            if prntobj:
-                                qualname = type(prntobj).__name__ + '.' + code.co_name
-                            else:
-                                qualname = code.co_name
-        
-                    fqn_name = (mod_name+'.'+qualname) if ( mod_name and mod_name != '__main__' ) else qualname
-                    return (fqn_name, frm.f_lineno)
-        
-                finally:
-                    del frm
-    
-    
-        def __init__(self,
-                     stdin=sys.stdin,
-                     stderr=sys.stdout,
-                     stdout=sys.stderr):
-    
-            self.streams = collections.namedtuple('streams',
-                                                  ['stdin',
-                                                   'stdout',
-                                                   'stderr'])(stdin=self.__class__.StreamIF(sys.stdin),
-                                                              stderr=self.__class__.StreamIF(sys.stdout),
-                                                              stdout=self.__class__.StreamIF(sys.stderr))
-        @property
-        def stdin(self):
-            return self.streams.stdin
-    
-        @property
-        def stdout(self):
-            return self.streams.stdout
-    
-        @property
-        def stderr(self):
-            return self.streams.stderr
-    
+    MODULES_USED_MAIN_TEMPLATE       = ['pytz', 'tzlocal', 'pkgstruct']
+    MODULES_USED_MAIN_FRMWK_TEMPLATE = ['pytz', 'tzlocal', 'pkgstruct', 
+                                        'argparse_extd', 'psutil', 'sshkeyring',
+                                        'enc_ds', 'plyer', 'pyobjus', 'kivy']
+
+    SCRLIB_USED_MAIN_TEMPLATE       = []
+    SCRLIB_USED_MAIN_FRMWK_TEMPLATE = ['streamextd']
+
     def __init__(self, argv:list=sys.argv, 
                  python_cmd:str=None, pip_cmd:str=None, 
                  prefix_cmd:str=None, git_cmd:str=None, 
@@ -162,6 +102,11 @@ class PyEncase(object):
                                                              'depends'     : [],
                                                              'pip_module'  : ['PyYAML']}
 
+        self.__class__.SCRIPT_STD_LIB['streamextd'] = {'creator'     : self.python_streamextd_template_save,
+                                                       'description' : 'Module for the extentions of sys.stdout/stderr',
+                                                       'depends'     : [],
+                                                       'pip_module'  : []}
+
     @property
     def stdin(self):
         return self.streams.stdin
@@ -173,7 +118,6 @@ class PyEncase(object):
     @property
     def stderr(self):
         return self.streams.stderr
-
 
     def set_python_path(self, python_cmd=None, pip_cmd=None, prefix_cmd=None):
         self.python_select = (python_cmd if isinstance(python_cmd,str) and python_cmd
@@ -210,10 +154,11 @@ class PyEncase(object):
             flg_substructure = (path_abs.parent.name=='bin')
             self.prefix  = str(path_abs.parent.parent) if flg_substructure else str(path_abs.parent)
 
-        self.bindir  = os.path.join(self.prefix, 'bin') if flg_substructure else self.prefix
-        self.libdir  = os.path.join(self.prefix, 'lib') if flg_substructure else self.prefix
-        self.vardir  = os.path.join(self.prefix, 'var') if flg_substructure else self.prefix
-        self.srcdir  = os.path.join(self.prefix, 'src') if flg_substructure else self.prefix
+        self.bindir  = os.path.join(self.prefix, 'bin')   if flg_substructure else self.prefix
+        self.libdir  = os.path.join(self.prefix, 'lib')   if flg_substructure else self.prefix
+        self.vardir  = os.path.join(self.prefix, 'var')   if flg_substructure else self.prefix
+        self.srcdir  = os.path.join(self.prefix, 'src')   if flg_substructure else self.prefix
+        self.datadir = os.path.join(self.prefix, 'share') if flg_substructure else self.prefix
 
         self.tmpdir            = os.path.join(self.vardir, 'tmp', 'python', 'packages', self.python_vertion_str)
         self.logdir            = os.path.join(self.vardir, 'log')
@@ -230,6 +175,7 @@ class PyEncase(object):
                              os.path.dirname(self.python_pip_logdir), 
                              os.path.dirname(self.tmpdir)]
 
+        self.kivy_home = os.path.join(self.datadir, os.path.basename(self.prefix)) if flg_substructure else self.prefix
 
     def set_git_path(self, git_cmd:str=None):
         self.git_path = shutil.which(git_cmd if isinstance(git_cmd,str) and git_cmd else os.environ.get('GIT', 'git'))
@@ -281,170 +227,196 @@ class PyEncase(object):
 
             sbprsrs = argprsrm.add_subparsers(dest='subcommand')
             
-            parser_add_info = sbprsrs.add_parser('info', help='Show information')
-            parser_add_info.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Show all path information')
-            parser_add_info.add_argument('-l', '--long',    action='store_true', help='Show long description')
-            parser_add_info.add_argument('-s', '--short',   action='store_true', help='Show minimum description')
-            parser_add_info.add_argument('-V', '--version', action='store_true', help='Show version information')
-            parser_add_info.add_argument('-m', '--pip-module-name',    action='store_true', help='Show PyPI module name')
-            parser_add_info.add_argument('-M', '--manage-script-name', action='store_true', help='Show manage script name')
-            parser_add_info.add_argument('-O', '--manage-option',      action='store_true', help='Show CLI option for manage-mode')
-            parser_add_info.set_defaults(handler=self.show_info)
+            parser_info = sbprsrs.add_parser('info', help='Show information')
+            parser_info.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Show all path information')
+            parser_info.add_argument('-l', '--long',    action='store_true', help='Show long description')
+            parser_info.add_argument('-s', '--short',   action='store_true', help='Show minimum description')
+            parser_info.add_argument('-V', '--version', action='store_true', help='Show version information')
+            parser_info.add_argument('-m', '--pip-module-name',    action='store_true', help='Show PyPI module name')
+            parser_info.add_argument('-M', '--manage-script-name', action='store_true', help='Show manage script name')
+            parser_info.add_argument('-O', '--manage-option',      action='store_true', help='Show CLI option for manage-mode')
+            parser_info.set_defaults(handler=self.show_info)
 
 
-            parser_add_contents = sbprsrs.add_parser('contents', help='Show file list')
-            parser_add_contents.add_argument('-v', '--verbose',     action='store_true', default=self.verbose, help='Show all path information')
-            parser_add_contents.add_argument('-a', '--all',         action='store_true', help='Show all list')
-            parser_add_contents.add_argument('-b', '--bin-script',  action='store_true', help='Show bin scripts')
-            parser_add_contents.add_argument('-l', '--lib-script',  action='store_true', help='Show lib scripts')
-            parser_add_contents.add_argument('-m', '--modules-src', action='store_true', help='Show module sources')
-            parser_add_contents.set_defaults(handler=self.show_contents)
+            parser_contents = sbprsrs.add_parser('contents', help='Show file list')
+            parser_contents.add_argument('-v', '--verbose',     action='store_true', default=self.verbose, help='Show all path information')
+            parser_contents.add_argument('-a', '--all',         action='store_true', help='Show all list')
+            parser_contents.add_argument('-b', '--bin-script',  action='store_true', help='Show bin scripts')
+            parser_contents.add_argument('-l', '--lib-script',  action='store_true', help='Show lib scripts')
+            parser_contents.add_argument('-m', '--modules-src', action='store_true', help='Show module sources')
+            parser_contents.set_defaults(handler=self.show_contents)
 
-            parser_add_init = sbprsrs.add_parser('init', help='Initialise Environment')
-            parser_add_init.add_argument('-P', '--python', default=None, help='Python path / command')
-            parser_add_init.add_argument('-I', '--pip',  default=None, help='PIP path / command')
-            parser_add_init.add_argument('-p', '--prefix',  default=self.prefix, help=('prefix of the directory tree. ' +
+            parser_init = sbprsrs.add_parser('init', help='Initialise Environment')
+            parser_init.add_argument('-P', '--python', default=None, help='Python path / command')
+            parser_init.add_argument('-I', '--pip',  default=None, help='PIP path / command')
+            parser_init.add_argument('-p', '--prefix',  default=self.prefix, help=('prefix of the directory tree. ' +
                                                                                        '(Default: Grandparent directory' +
                                                                                        ' if the name of parent directory of %s is bin,'
                                                                                        ' otherwise current working directory.' 
                                                                                        % (self.path_invoked.name, )))
-            parser_add_init.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
-            parser_add_init.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
-            parser_add_init.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+            parser_init.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
+            parser_init.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
+            parser_init.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
 
 
-            parser_add_init.add_argument('-M', '--move', action='store_true', help='moving this script body into instead of copying')
-            parser_add_init.add_argument('-g', '--git',  action='store_true', help='setup files for git')
+            parser_init.add_argument('-M', '--move', action='store_true', help='moving this script body into instead of copying')
+            parser_init.add_argument('-g', '--git',  action='store_true', help='setup files for git')
 
-            self.__class__.GitIF.add_remoteif_arguments(arg_parser=parser_add_init)
-            #self.__class__.GitIF.add_invokeoptions_arguments(arg_parser=parser_add_init)
+            self.__class__.GitIF.add_remoteif_arguments(arg_parser=parser_init)
+            #self.__class__.GitIF.add_invokeoptions_arguments(arg_parser=parser_init)
             
-            parser_add_init.add_argument('-r', '--readme', action='store_true', help='setup/update README.md')
-            parser_add_init.add_argument('-t', '--title',  help='Project title')
-            parser_add_init.add_argument('-m', '--module', default=[], action='append', help='install module by pip')
-            parser_add_init.add_argument('-s', '--script-lib', default=[], action='append', help='install library script from template.')
-            parser_add_init.add_argument('-S', '--std-script-lib', action='store_true', help=('install standard library scripts. (equivalent to "' +
-                                                                                         ' '.join(['-s %s' % (m, ) for m 
-                                                                                                   in self.__class__.SCRIPT_STD_LIB.keys() ])
-                                                                                         +')"'))
-            parser_add_init.add_argument('scriptnames', nargs='*', help='script file name to be created')
-            parser_add_init.set_defaults(handler=self.manage_env)
-          
-            parser_add_add = sbprsrs.add_parser('add', help='add new script files')
-            parser_add_add.add_argument('-P', '--python', default=None, help='Python path / command')
-            parser_add_add.add_argument('-I', '--pip',  default=None, help='PIP path / command')
-            parser_add_add.add_argument('-p', '--prefix',  default=self.prefix, help=('prefix of the directory tree. ' +
+            parser_init.add_argument('-r', '--readme', action='store_true',        help='setup/update README.md')
+
+            parser_init.add_argument('-F', '--app-framework', action='store_true', default=False, help='Use template with application framework')
+            parser_init.add_argument('-B', '--bare-script',   action='store_false', dest='app_framework', help='Use template without application framework')
+            parser_init.add_argument('-K', '--gui-kvfile', type=str, nargs='?', const=None, default='',
+                                         help='Add sample KV file for GUI aplication')
+
+            parser_init.add_argument('-t', '--title',  help='Project title')
+            parser_init.add_argument('-m', '--module', default=[], action='append', help='install module by pip')
+            parser_init.add_argument('-O', '--required-module', action='store_true', help='install module used in the template by pip')
+            parser_init.add_argument('-s', '--script-lib', default=[], action='append', help='install library script from template.')
+            parser_init.add_argument('-S', '--std-script-lib', action='store_true', help=('install standard library scripts. (equivalent to "' +
+                                                                                              ' '.join(['-s %s' % (m, ) for m 
+                                                                                                        in self.__class__.SCRIPT_STD_LIB.keys() ])
+                                                                                              +')"'))
+            parser_init.add_argument('scriptnames', nargs='*', help='script file name to be created')
+            parser_init.set_defaults(handler=self.manage_env)
+            
+            parser_add = sbprsrs.add_parser('add', help='add new script files')
+            parser_add.add_argument('-P', '--python', default=None, help='Python path / command')
+            parser_add.add_argument('-I', '--pip',  default=None, help='PIP path / command')
+            parser_add.add_argument('-p', '--prefix',  default=self.prefix, help=('prefix of the directory tree. ' +
                                                                                       '(Default: Grandparent directory' +
                                                                                       ' if the name of parent directory of %s is bin,'
                                                                                       ' otherwise current working directory.' 
                                                                                       % (self.path_invoked.name, )))
-            parser_add_add.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
-            parser_add_add.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
-            parser_add_add.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+            parser_add.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
+            parser_add.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
+            parser_add.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
 
-            parser_add_add.add_argument('-r', '--readme', action='store_true', help='setup/update README.md')
-            parser_add_add.add_argument('-m', '--module', default=[], action='append', help='install module by pip')
-            parser_add_add.add_argument('-s', '--script-lib', default=[], action='append', help='install library script from template.')
-            parser_add_add.add_argument('-S', '--std-script-lib', action='store_true', help=('install standard library scripts. (equivalent to "' +
+            parser_add.add_argument('-r', '--readme', action='store_true', help='setup/update README.md')
+
+            parser_add.add_argument('-F', '--app-framework', action='store_true',  default=False, help='Use template with application framework')
+            parser_add.add_argument('-B', '--bare-script',   action='store_false', dest='app_framework', help='Use template without application framework')
+            parser_add.add_argument('-K', '--gui-kvfile', type=str, nargs='?', const=None, default=None,
+                                         help='Add sample KV file for GUI aplication')
+
+            parser_add.add_argument('-m', '--module', default=[], action='append', help='install module by pip')
+            parser_add.add_argument('-s', '--script-lib', default=[], action='append', help='install library script from template.')
+            parser_add.add_argument('-S', '--std-script-lib', action='store_true', help=('install standard library scripts. (equivalent to "' +
                                                                                              ' '.join(['-s %s' % (m, ) for m 
                                                                                                        in self.__class__.SCRIPT_STD_LIB.keys() ])
                                                                                              +'"'))
-            parser_add_add.add_argument('scriptnames', nargs='+', help='all files')
-            parser_add_add.set_defaults(handler=self.manage_env)
 
-            parser_add_addlib = sbprsrs.add_parser('addlib', help='add new script files')
-            parser_add_addlib.add_argument('-P', '--python', default=None, help='Python path / command')
-            parser_add_addlib.add_argument('-I', '--pip',  default=None, help='PIP path / command')
-            parser_add_addlib.add_argument('-p', '--prefix',  default=self.prefix, help=('prefix of the directory tree. ' +
+            parser_add.add_argument('scriptnames', nargs='+', help='all files')
+            parser_add.set_defaults(handler=self.manage_env)
+
+            parser_addlib = sbprsrs.add_parser('addlib', help='add new script files')
+            parser_addlib.add_argument('-P', '--python', default=None, help='Python path / command')
+            parser_addlib.add_argument('-I', '--pip',  default=None, help='PIP path / command')
+            parser_addlib.add_argument('-p', '--prefix',  default=self.prefix, help=('prefix of the directory tree. ' +
                                                                                          '(Default: Grandparent directory' +
                                                                                          ' if the name of parent directory of %s is bin,'
                                                                                          ' otherwise current working directory.' 
-                                                                                        % (self.path_invoked.name, )))
-            parser_add_addlib.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
-            parser_add_addlib.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
-            parser_add_addlib.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
-            parser_add_addlib.add_argument('-r', '--readme', action='store_true', help='setup/update README.md')
-            parser_add_addlib.add_argument('-m', '--module', default=[], action='append', help='install module by pip')
-            parser_add_addlib.add_argument('-S', '--std-script-lib', action='store_true', help=('install standard library scripts. (equivalent to "' +
+                                                                                         % (self.path_invoked.name, )))
+            parser_addlib.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
+            parser_addlib.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
+            parser_addlib.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+            parser_addlib.add_argument('-r', '--readme', action='store_true', help='setup/update README.md')
+            parser_addlib.add_argument('-m', '--module', default=[], action='append', help='install module by pip')
+            parser_addlib.add_argument('-S', '--std-script-lib', action='store_true', help=('install standard library scripts. (equivalent to "' +
                                                                                                 ' '.join(['-s %s' % (m, ) for m 
                                                                                                           in self.__class__.SCRIPT_STD_LIB.keys() ])
                                                                                                 +'"'))
-            parser_add_addlib.add_argument('script_lib', nargs='+', help='all files')
-            parser_add_addlib.set_defaults(handler=self.manage_env)
+            parser_addlib.add_argument('script_lib', nargs='+', help='all files')
+            parser_addlib.set_defaults(handler=self.manage_env)
 
-            parser_add_newmodule = sbprsrs.add_parser('newmodule', help='add new module source')
-            parser_add_newmodule.add_argument('-P', '--python', default=None, help='Python path / command')
-            parser_add_newmodule.add_argument('-I', '--pip',  default=None, help='PIP path / command')
-            parser_add_newmodule.add_argument('-p', '--prefix',  default=self.prefix, help=('prefix of the directory tree. ' +
-                                                                                         '(Default: Grandparent directory' +
+            parser_addkv = sbprsrs.add_parser('addkv', help='add new script files')
+            parser_addkv.add_argument('-p', '--prefix',  default=self.prefix, help=('prefix of the directory tree. ' +
+                                                                                        '(Default: Grandparent directory' +
                                                                                          ' if the name of parent directory of %s is bin,'
                                                                                          ' otherwise current working directory.' 
-                                                                                        % (self.path_invoked.name, )))
-            parser_add_newmodule.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
-            parser_add_newmodule.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
-            parser_add_newmodule.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+                                                                                         % (self.path_invoked.name, )))
+            parser_addkv.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
+            parser_addkv.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+            parser_addkv.add_argument('kvfiles', nargs='+', help='all files')
+            parser_addkv.set_defaults(handler=self.manage_env)
 
-            parser_add_newmodule.add_argument('-S', '--set-shebang', action='store_true', help='Set shebang based on the local environment')
 
-            parser_add_newmodule.add_argument('-Q', '--no-readme', action='store_false', dest='readme',
+            parser_newmodule = sbprsrs.add_parser('newmodule', help='add new module source')
+            parser_newmodule.add_argument('-P', '--python', default=None, help='Python path / command')
+            parser_newmodule.add_argument('-I', '--pip',  default=None, help='PIP path / command')
+            parser_newmodule.add_argument('-p', '--prefix',  default=self.prefix, help=('prefix of the directory tree. ' +
+                                                                                            '(Default: Grandparent directory' +
+                                                                                            ' if the name of parent directory of %s is bin,'
+                                                                                            ' otherwise current working directory.' 
+                                                                                            % (self.path_invoked.name, )))
+            parser_newmodule.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
+            parser_newmodule.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
+            parser_newmodule.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+
+            parser_newmodule.add_argument('-S', '--set-shebang', action='store_true', help='Set shebang based on the local environment')
+
+            parser_newmodule.add_argument('-Q', '--no-readme', action='store_false', dest='readme',
                                               default='True', help='NO README.md created')
-            parser_add_newmodule.add_argument('-b', '--no-git-file', action='store_false', dest='git',
+            parser_newmodule.add_argument('-b', '--no-git-file', action='store_false', dest='git',
                                               default='True', help='NO README.md created')
             
-            self.__class__.GitIF.add_remoteif_arguments(arg_parser=parser_add_newmodule)
-            #self.__class__.GitIF.add_invokeoptions_arguments(arg_parser=parser_add_newmodule)
+            self.__class__.GitIF.add_remoteif_arguments(arg_parser=parser_newmodule)
+            #self.__class__.GitIF.add_invokeoptions_arguments(arg_parser=parser_newmodule)
 
-            parser_add_newmodule.add_argument('-W', '--module-website', default=[], action='append', help='New module URL')
-            parser_add_newmodule.add_argument('-d', '--description',  help='Project description')
-            parser_add_newmodule.add_argument('-t', '--title',        help='Project title')
-            parser_add_newmodule.add_argument('-C', '--class-name', default=[], action='append', help='Module class name')
-            parser_add_newmodule.add_argument('-m', '--module', default=[], action='append', help='required (external) modules used by new modules')
-            parser_add_newmodule.add_argument('-k', '--keywords', default=[], action='append', help='keywords related to new modules')
-            parser_add_newmodule.add_argument('-c', '--classifiers', default=[], action='append', help='keywords related to new modules')
-            parser_add_newmodule.add_argument('-A', '--author-name',   default=[], action='append', help='author name of new modules')
-            parser_add_newmodule.add_argument('-E', '--author-email',  default=[], action='append', help='author email of new modules')
-            parser_add_newmodule.add_argument('-M', '--maintainer-name',  default=[], action='append', help='maintainer name of new modules')
-            parser_add_newmodule.add_argument('-N', '--maintainer-email',  default=[], action='append', help='maintainer email of new modules')
-            parser_add_newmodule.add_argument('-Y', '--create-year', default=[], action='append', help='Year in LICENSE')
-            parser_add_newmodule.add_argument('module_name', nargs='+', help='new module names')
-            parser_add_newmodule.set_defaults(handler=self.setup_newmodule)
+            parser_newmodule.add_argument('-W', '--module-website', default=[], action='append', help='New module URL')
+            parser_newmodule.add_argument('-d', '--description',  help='Project description')
+            parser_newmodule.add_argument('-t', '--title',        help='Project title')
+            parser_newmodule.add_argument('-C', '--class-name', default=[], action='append', help='Module class name')
+            parser_newmodule.add_argument('-m', '--module', default=[], action='append', help='required (external) modules used by new modules')
+            parser_newmodule.add_argument('-k', '--keywords', default=[], action='append', help='keywords related to new modules')
+            parser_newmodule.add_argument('-c', '--classifiers', default=[], action='append', help='keywords related to new modules')
+            parser_newmodule.add_argument('-A', '--author-name',   default=[], action='append', help='author name of new modules')
+            parser_newmodule.add_argument('-E', '--author-email',  default=[], action='append', help='author email of new modules')
+            parser_newmodule.add_argument('-M', '--maintainer-name',  default=[], action='append', help='maintainer name of new modules')
+            parser_newmodule.add_argument('-N', '--maintainer-email',  default=[], action='append', help='maintainer email of new modules')
+            parser_newmodule.add_argument('-Y', '--create-year', default=[], action='append', help='Year in LICENSE')
+            parser_newmodule.add_argument('module_name', nargs='+', help='new module names')
+            parser_newmodule.set_defaults(handler=self.setup_newmodule)
             
-            parser_add_updatereadme = sbprsrs.add_parser('update_readme', help='update readme file')
-            parser_add_updatereadme.set_defaults(handler=self.manage_readme)
-            parser_add_updatereadme.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
-            parser_add_updatereadme.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
-            parser_add_updatereadme.add_argument('-b', '--backup',  action='store_true', help='Keep backup file')
-            parser_add_updatereadme.add_argument('-t', '--title',   help='Title text')
+            parser_updatereadme = sbprsrs.add_parser('update_readme', help='update readme file')
+            parser_updatereadme.set_defaults(handler=self.manage_readme)
+            parser_updatereadme.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
+            parser_updatereadme.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+            parser_updatereadme.add_argument('-b', '--backup',  action='store_true', help='Keep backup file')
+            parser_updatereadme.add_argument('-t', '--title',   help='Title text')
 
-            parser_add_managegit = sbprsrs.add_parser('init_git', help='Initialise git repository')
-            parser_add_managegit.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
-            parser_add_managegit.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
-            parser_add_managegit.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
-            self.__class__.GitIF.add_remoteif_arguments(arg_parser=parser_add_managegit)
-            parser_add_managegit.add_argument('-m', '--module-src', help='Setup git for specified module source')
-            parser_add_managegit.set_defaults(handler=self.manage_git)
+            parser_init_git = sbprsrs.add_parser('init_git', help='Initialise git repository')
+            parser_init_git.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
+            parser_init_git.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
+            parser_init_git.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+            self.__class__.GitIF.add_remoteif_arguments(arg_parser=parser_init_git)
+            parser_init_git.add_argument('-m', '--module-src', help='Setup git for specified module source')
+            parser_init_git.set_defaults(handler=self.manage_git)
 
-            parser_add_clean = sbprsrs.add_parser('clean', help='clean-up')
+            parser_clean = sbprsrs.add_parser('clean', help='clean-up')
 
-            parser_add_clean.set_defaults(handler=self.clean_env)
-            parser_add_clean.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
-            parser_add_clean.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+            parser_clean.set_defaults(handler=self.clean_env)
+            parser_clean.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
+            parser_clean.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
 
-            parser_add_distclean = sbprsrs.add_parser('distclean', help='Entire clean-up')
-            parser_add_distclean.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
-            parser_add_distclean.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
-            parser_add_distclean.set_defaults(handler=self.clean_env)
+            parser_distclean = sbprsrs.add_parser('distclean', help='Entire clean-up')
+            parser_distclean.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
+            parser_distclean.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+            parser_distclean.set_defaults(handler=self.clean_env)
 
-            #parser_add_selfupdate = sbprsrs.add_parser('selfupdate', help='Self update of '+os.path.basename(__file__))
-            parser_add_selfupdate = sbprsrs.add_parser('selfupdate', 
+            #parser_selfupdate = sbprsrs.add_parser('selfupdate', help='Self update of '+os.path.basename(__file__))
+            parser_selfupdate = sbprsrs.add_parser('selfupdate', 
                                                        help='Self update of '
                                                        +pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name)
 
-            parser_add_selfupdate.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
-            parser_add_selfupdate.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
-            parser_add_selfupdate.add_argument('-f', '--force-install', action='store_true', help='Force install')
+            parser_selfupdate.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
+            parser_selfupdate.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+            parser_selfupdate.add_argument('-f', '--force-install', action='store_true', help='Force install')
 
-            parser_add_selfupdate.set_defaults(handler=self.self_update)
+            parser_selfupdate.set_defaults(handler=self.self_update)
 
             for c,cc in self.__class__.PIP_SBCMDS_ACCEPT.items():
                 _scmd = c if cc is None else cc
@@ -664,12 +636,13 @@ class PyEncase(object):
             print(self.description())
             return
 
-        if flg_long:
-            print(self.description())
-            print('PIP module name:    ', self.__class__.PIP_MODULE_NAME )
-            print('PIP module version: ', self.__class__.VERSION )
-            print('Manage script name: ', self.__class__.MNG_SCRIPT)
-            print('Manage mode option: ', self.__class__.MNG_OPT)
+        print(self.description())
+        print('PIP module name        : ', self.__class__.PIP_MODULE_NAME )
+        print('PIP module version     : ', self.__class__.VERSION )
+        print('Manage script name     : ', self.__class__.MNG_SCRIPT)
+        print('Manage mode option     : ', self.__class__.MNG_OPT)
+
+        if not flg_long:
             return
 
         print("Description            : ", self.description())
@@ -683,6 +656,7 @@ class PyEncase(object):
         print("bin directory          : ", self.bindir)
         print("var directory          : ", self.vardir)
         print("src directory          : ", self.srcdir)
+        print("data directory         : ", self.datadir)
         print("tmp directory          : ", self.tmpdir)
         print("log directory          : ", self.logdir)
         print("script directory       : ", self.python_path)
@@ -694,6 +668,7 @@ class PyEncase(object):
         print("PIP log directory      : ", self.python_pip_logdir)
         print("PIP log path           : ", self.python_pip_log_path)
         print("Python shebang         : ", self.python_shebang)
+        print("KIVY_HOME              : ", self.kivy_home)
 
     def show_contents(self, args:argparse.Namespace, rest:list=[]):
         flg_verbose = args.verbose       if hasattr(args, 'verbose')       else self.verbose
@@ -943,6 +918,85 @@ class PyEncase(object):
             self.__class__.remove_dircontents(path_dir=pdir, 
                                               dir_itself=False,
                                               verbose=flg_verbose, dry_run=flg_dry_run)
+
+
+    ########## ____STREAMEXTD_TEMPLATE_START____ ##########
+    #### ____py_shebang_pattern____ ####
+    # -*- coding: utf-8 -*-
+    import sys
+    import _io
+    import collections
+    import inspect
+
+    class StreamExtd(object):
+        """
+        Extended I/O Stream Interface
+        """
+        def __init__(self, 
+                     stdin:_io.TextIOWrapper=sys.stdin,
+                     stderr:_io.TextIOWrapper=sys.stdout,
+                     stdout:_io.TextIOWrapper=sys.stderr):
+            streams_t = collections.namedtuple('streams',
+                                               ['stdin', 'stdout','stderr'])
+            self.streams = streams_t(stdin=self.__class__.StreamIF(sys.stdin),
+                                     stderr=self.__class__.StreamIF(sys.stdout),
+                                     stdout=self.__class__.StreamIF(sys.stderr))
+    
+        @property
+        def stdin(self):
+            return self.streams.stdin
+    
+        @property
+        def stdout(self):
+            return self.streams.stdout
+    
+        @property
+        def stderr(self):
+            return self.streams.stderr
+    
+        class StreamIF(object):
+            """
+            Wrapper for stdout/stderr to show with full qualified function name
+            """
+            def __init__(self, stream:_io.TextIOWrapper=sys.stderr):
+                self.stream = stream
+                
+            def write(self, text='', *args, cls_name:str=None, more_upper:bool=False):
+                refname,lineno = self.caller_fqn(cls_name=cls_name, more_upper=more_upper)
+                lhdr   = "[%s:%d] " % (refname, lineno)
+                fmttxt = (text % tuple(args)) if len(args)>0 else text
+                return self.stream.write(lhdr+(fmttxt if fmttxt.endswith('\n') else fmttxt+'\n'))
+            
+            def caller_fqn(self, cls_name:str=None, more_upper:bool=False):
+                try:
+                    if more_upper:
+                        frm = inspect.currentframe().f_back.f_back.f_back
+                    else:
+                        frm = inspect.currentframe().f_back.f_back
+        
+                    mod_name = frm.f_globals.get('__name__', '')
+                    code = frm.f_code
+    
+                    if sys.version_info >= (3, 11):
+                        qualname = code.co_qualname
+                    else:
+                        if cls_name:
+                            qualname = '.'.join([cls_name, code.co_name])
+                        else:
+                            prntobj = frm.f_locals.get('self') or frm.f_locals.get('cls')
+                            if prntobj:
+                                qualname = '.'.join([type(prntobj).__name__, code.co_name])
+                            else:
+                                qualname = code.co_name
+        
+                    fqn_name = '.'.join([mod_name, qualname, ]) if ( mod_name and mod_name != '__main__' ) else qualname
+    
+                    return (fqn_name, frm.f_lineno)
+    
+                finally:
+                    del frm
+
+    ########## ____STREAMEXTD_TEMPLATE_END____ ##########
 
     class ExtCmdIF(StreamExtd):
     
@@ -2153,6 +2207,46 @@ class PyEncase(object):
         scrptlibs = args.script_lib  if hasattr(args, 'script_lib') else []
         scripts   = args.scriptnames if hasattr(args, 'scriptnames') else []
 
+        flg_frmwk  = args.app_framework if hasattr(args, 'app_framework') else False
+        opt_kvfile = args.gui_kvfile    if hasattr(args, 'gui_kvfile')    else None
+
+        if subcmd in ('init', 'add'):
+            if hasattr(args, 'required_module') and args.required_module:
+                module_used = (self.__class__.MODULES_USED_MAIN_FRMWK_TEMPLATE
+                               if flg_frmwk else
+                               self.__class__.MODULES_USED_MAIN_TEMPLATE)
+                for m in module_used:
+                    if m in modules:
+                        continue
+                    modules.append(m)
+
+            scrlibs_used = (self.__class__.SCRLIB_USED_MAIN_FRMWK_TEMPLATE
+                            if flg_frmwk else
+                            self.__class__.SCRLIB_USED_MAIN_TEMPLATE)
+
+            for _scrlib in scrlibs_used:
+                if _scrlib in scrptlibs or (_scrlib+'.py') in scrptlibs:
+                    continue
+                scrptlibs.append(_scrlib)
+
+        kvfiles = []
+        if subcmd=='addkv':
+            if opt_kvfile and len(opt_kvfile)>0:
+                kvfiles.append(opt_kvfile.removesuffix('.kv') + '.kv')
+            if hasattr(args, 'kvfiles'):
+                if isinstance(args.kvfiles,(list,tuple)):
+                    kvfiles.extend(args.kvfiles)
+                elif isinstance(args.kvfiles, str):
+                    kvfiles.append(args.kvfiles)
+            #if len(kvfiles)<1:
+            #    kvfiles.append( os.path.basename(self.prefix).kv )
+        elif subcmd in ('init', 'add'):
+            if opt_kvfile and len(opt_kvfile)>0:
+                kvfiles.append(opt_kvfile.removesuffix('.kv') + '.kv')
+            elif flg_frmwk or (opt_kvfile is not None):
+                for x in scripts:
+                    kvfiles.append(x.removesuffix('.py') + '.kv')
+
         if hasattr(args, 'std_script_lib') and args.std_script_lib:
             for _scrlib in self.__class__.SCRIPT_STD_LIB.keys():
                 if _scrlib in scrptlibs or (_scrlib+'.py') in scrptlibs:
@@ -2222,13 +2316,22 @@ class PyEncase(object):
                                              verbose=flg_verbose, dry_run=flg_dry_run)
 
         self.add_pyscr(basename=[x.removesuffix('.py') for x in scripts],
-                       keywords=keyword_buf, verbose=flg_verbose, dry_run=flg_dry_run)
+                       keywords=keyword_buf, use_framework=flg_frmwk,
+                       verbose=flg_verbose, dry_run=flg_dry_run)
                 
         self.add_pylib(basename=[x.removesuffix('.py') for x in scrptlibs],
                        keywords=keyword_buf, verbose=flg_verbose, dry_run=flg_dry_run)
 
+
+        self.create_kvfile(kvfiles=kvfiles,
+                           kivy_home=None,
+                           template_s_marker=None,
+                           templete_e_marker=None,
+                           dry_run=flg_dry_run, verbose=flg_verbose)
+
         if len(modules)>0:
             self.run_pip(subcmd='install', args=modules, verbose=flg_verbose, dry_run=flg_dry_run)
+
 
     def manage_readme(self, args:argparse.Namespace, rest:list=[]):
         subcmd = args.subcommand if hasattr(args, 'subcommand') else 'unknown'
@@ -2605,10 +2708,13 @@ class PyEncase(object):
             chanks += "___"
         return chanks
 
-    def add_pyscr(self, basename, keywords={}, verbose=False, dry_run=False):
+    def add_pyscr(self, basename, keywords={},
+                  use_framework=False, verbose=False, dry_run=False):
         if isinstance(basename, list):
             for bn in basename:
-                self.add_pyscr(bn, keywords=keywords, verbose=verbose, dry_run=dry_run)
+                self.add_pyscr(bn, keywords=keywords,
+                               use_framework=use_framework,
+                               verbose=verbose, dry_run=dry_run)
             return
 
         scr_path = os.path.join(self.python_path, basename+'.py')
@@ -2630,15 +2736,20 @@ class PyEncase(object):
 
                 code_filter = self.__class__.PyCodeFilter(self.python_shebang, keyword_table=str_format)
 
+                if use_framework:
+                    smrkr = r'\s*#{5,}\s*____PY_MAIN_APP_FRAMEWORK_TEMPLATE_START____\s*#{5,}'
+                    emrkr = r'\s*#{5,}\s*____PY_MAIN_APP_FRAMEWORK_TEMPLATE_END____\s*#{5,}'
+                else:
+                    smrkr = r'\s*#{5,}\s*____PY_MAIN_TEMPLATE_START____\s*#{5,}'
+                    emrkr = r'\s*#{5,}\s*____PY_MAIN_TEMPLATE_END____\s*#{5,}'
+
                 self.__class__.EmbeddedText.extract_to_file(outfile=scr_path,infile=None,
-                                                            s_marker=r'\s*#{5,}\s*____PY_MAIN_TEMPLATE_START____\s*#{5,}',
-                                                            e_marker=r'\s*#{5,}\s*____PY_MAIN_TEMPLATE_END____\s*#{5,}',
-                                                            include_markers=False, multi_match=False,dedent=True, 
+                                                            s_marker=smrkr, e_marker=emrkr,
+                                                            include_markers=False, multi_match=False, dedent=True, 
                                                             skip_head_emptyline=True, skip_tail_emptyline=True,
                                                             dequote=False, format_filter=code_filter, 
                                                             open_mode='w', encoding=self.encoding)
                 os.chmod(scr_path, mode=0o755)
-
 
         bin_path = os.path.join(self.bindir, basename)
         if os.path.exists(bin_path):
@@ -2679,6 +2790,57 @@ class PyEncase(object):
                                                                 skip_head_emptyline=True, skip_tail_emptyline=True,
                                                                 dequote=False, format_filter=code_filter, 
                                                                 open_mode='w', encoding=self.encoding)
+
+    def create_kvfile(self, kvfiles,
+                      kivy_home=None,
+                      template_s_marker=None,
+                      templete_e_marker=None,
+                      dry_run=False, verbose=False, format_alist={}, **format_args):
+        if isinstance(kvfiles, list):
+            for kv in kvfiles:
+                self.create_kvfile(kv, kivy_home=kivy_home,
+                                   template_s_marker=template_s_marker,
+                                   templete_e_marker=templete_e_marker,
+                                   dry_run=dry_run, verbose=verbose,
+                                   format_alist=format_alist, **format_args)
+            return
+
+        if (not isinstance(kvfiles, str)) or len(kvfiles)<1:
+            return
+
+        kv        = kvfiles if kvfiles.endswith('.kv') else kvfiles+'.kv'
+        kivy_home = kivy_home if kivy_home else self.kivy_home
+
+        kv_path   = os.path.join(kivy_home, kv)
+
+        if os.path.exists(kv_path):
+            if verbose:
+                self.stderr.write("Warning File exists : skip : '%s'" % (kv_path, ))
+            return
+
+        if verbose or dry_run:
+            self.stderr.write("KV file: '%s'" % (kv_path, ))
+
+        if not dry_run:
+            str_format={'____APPNAME____': kv.removesuffix('.kv')}
+            str_format.update(format_alist)
+            str_format.update(**format_args)
+            
+            text_filter = self.__class__.EmbeddedText.FormatFilter(format_variables=str_format)
+
+            tmplt_s_mrkr = template_s_marker if template_s_marker else r'\s*#{5,}\s*____PY_MAIN_KVFILE_TEMPLATE_START____\s*#{5,}'
+            tmplt_e_mrkr = templete_e_marker if template_s_marker else r'\s*#{5,}\s*____PY_MAIN_KVFILE_TEMPLATE_END____\s*#{5,}'
+
+            os.makedirs(os.path.dirname(kv_path), mode=0o755, exist_ok=True)
+            self.__class__.EmbeddedText.extract_to_file(outfile=kv_path, infile=None,
+                                                        s_marker=tmplt_s_mrkr,
+                                                        e_marker=tmplt_e_mrkr,
+                                                        include_markers=False, multi_match=False,dedent=True, 
+                                                        skip_head_emptyline=True, skip_tail_emptyline=True,
+                                                        dequote=True, format_filter=text_filter, 
+                                                        open_mode='w', encoding=self.encoding)
+            os.chmod(kv_path, mode=0o644)
+
 
     def make_gitignore_contents(self, output_path,
                                 git_keepdirs=None,
@@ -3028,6 +3190,19 @@ class PyEncase(object):
                                                     s_marker=r'\s*#{5,}\s*____INTRINSIC_FORMATTER_TEMPLATE_START____\s*#{5,}',
                                                     e_marker=r'\s*#{5,}\s*____INTRINSIC_FORMATTER_TEMPLATE_END____\s*#{5,}',
                                                     include_markers=False, multi_match=False,dedent=True, 
+                                                    skip_head_emptyline=True, skip_tail_emptyline=True,
+                                                    dequote=False, format_filter=code_filter, 
+                                                    open_mode='w', encoding=self.encoding)
+        os.chmod(outputfile, mode=0o644)
+
+    def python_streamextd_template_save(self, outputfile, keywords:dict={}, shebang:str=None):
+
+        code_filter = self.__class__.PyCodeFilter(self.python_shebang, keyword_table=keywords)
+
+        self.__class__.EmbeddedText.extract_to_file(outfile=outputfile, infile=None,
+                                                    s_marker=r'\s*#{5,}\s*____STREAMEXTD_TEMPLATE_START____\s*#{5,}',
+                                                    e_marker=r'\s*#{5,}\s*____STREAMEXTD_TEMPLATE_END____\s*#{5,}',
+                                                    include_markers=False, multi_match=True,dedent=True, 
                                                     skip_head_emptyline=True, skip_tail_emptyline=True,
                                                     dequote=False, format_filter=code_filter, 
                                                     open_mode='w', encoding=self.encoding)
@@ -3392,6 +3567,508 @@ if __name__=='__main__':
 
         ########## ____PY_MAIN_TEMPLATE_END____ ##########
 
+
+        ########## ____PY_MAIN_APP_FRAMEWORK_TEMPLATE_START____ ##########
+        #### ____py_shebang_pattern____ ####
+        # -*- coding: utf-8 -*-
+            
+        import os
+        import sys
+        import _io
+        import collections
+        import inspect
+        import copy
+        import getpass
+        
+        import pydoc
+        import datetime
+        import time
+        import threading
+        
+        import argparse_extd
+        
+        import pkgstruct
+        
+        import psutil
+        import pytz
+        import tzlocal
+        
+        import sshkeyring
+        import enc_ds
+        
+        import plyer
+        import streamextd
+
+        class ____SCRIPT_CAPITAL_SYMBOLIZED____Framework(streamextd.StreamExtd):
+            """
+            ____SCRIPT_CAPITAL_SYMBOLIZED____Framework: Skeleton of Application Framework (____SCRIPT_NAME____)
+            """
+        
+            def __init__(self, argv:list=sys.argv, **args):
+                super().__init__(**args)
+        
+                # Sample code to utilize application directory structure
+                self.name_invoked = argv[0].removesuffix('.py')
+                self.pkg_info     = pkgstruct.PkgStruct(script_path=self.name_invoked)
+        
+                # Sample code to utilize enciphered data storage
+                self.pwdmgr = self.__class__.EncDataMgr(pkg_info=self.pkg_info, **args)
+                self.pwdmgr.setup()
+                    
+        
+            def main(self, argv:list=sys.argv):
+        
+                config_name_default = self.pkg_info.script_basename+'.config.json'
+                pkg_default_config  = self.pkg_info.concat_path('pkg_statedatadir', 'config', config_name_default)
+        
+                # Sample code to utilize the extended argument parser (`argparse_extd`)
+                #   : loading from / saving to "config file", etc
+                argprsr = argparse_extd.ArgumentParserExtd(add_help=True)
+                argprsr.load_config(pkg_default_config)
+                argprsr.add_argument_config()
+                argprsr.add_argument_save_config(default_path=pkg_default_config)
+                argprsr.add_argument_verbose()
+                argprsr.add_argument_quiet(dest='verbose')
+        
+                # Add CLI options for the enciphered data storage
+                self.pwdmgr.add_argparser_options(arg_parser=argprsr)
+        
+                argprsr.add_argument('-o', '--output', type=str, help='output filename') 
+                argprsr.add_argument('-f', '--dump-format', type=str,
+                                     choices=argparse_extd.ArgumentParserExtd.CONFIG_FORMAT,
+                                     default='json', help='Output format')
+        
+                # Example of usual comand-line options 
+                argprsr.add_argument('-d', '--date', action='store_true', help='Show current date & time')
+                argprsr.add_argument('-D', '--wo-date', action='store_false', dest='date', help='Do not show current date & time')
+        
+                argprsr.add_argument('-g', '--gui',    action='store_true',              help='GUI mode')
+                argprsr.add_argument('-G', '--wo-gui', action='store_false', dest='gui', help='CLI only mode')
+        
+                # Example of usual comand-line arguments
+                argprsr.add_argument('argv', nargs='*', help='Arguments')
+        
+                # Specify the command-line options/arguments which are not saved into config files 
+                arg_opts_not_save = ['--default-config', 'verbose',
+                                     '--output', '--save-config', 'gui', 'argv'] 
+                arg_opts_not_save += self.pwdmgr.ls_argparser_attrs()
+                argprsr.append_write_config_exclude(arg_opts_not_save)
+            
+                # Parse command-line arguments
+                args = argprsr.parse_args(argv, action_help=False)
+        
+                # Save command-line options into config file
+                argprsr.save_config_action()
+                # Additional saving of configuration according to CL option
+                argprsr.write_config(argprsr.args.output)
+        
+                # Example to manipurate the enciphered data storage
+                if self.pwdmgr.manage_auth_password(args=argprsr.args):
+                    return
+        
+                #
+                # Examples to correct the run-time / running-environment info.
+                # 
+                app_info = {'Python': ( "%d.%d.%d" % sys.version_info[0:3]
+                                        +" (%s)" % sys.executable),
+                            'Argv'  : ' '.join(args.argv)}
+                KEYWORDS = ['pkg_name', 'pkg_path', 'prefix']
+                app_info.update({ k: self.pkg_info[k] for k in KEYWORDS })
+        
+                tz_local = tzlocal.get_localzone()
+                mech_info  = f'CPU Usage: {psutil.cpu_percent(interval=1)} %'
+                mech_info += f', Load Avg. = {psutil.getloadavg()[0]:.2f}'
+                if argprsr.args.date:
+                    mech_info += f' @ {datetime.datetime.now(tz=tz_local).strftime("%c")}'
+                else:
+                    mech_info += f' @ {datetime.datetime.now().strftime("%c")}'
+                app_info.update({'MECH': mech_info })
+        
+                #
+                # Example codes for non-GUI (CLI) environment
+                # 
+                if not argprsr.args.gui:
+                    for k,v in app_info.items():
+                        self.stdout.write(("%-9s %s" % (str(k)+':', v)).replace('%', '%%'))
+                    return
+        
+                #
+                # Example codes for GUI application by KIVY
+                # 
+                # Suppress parsing command-line arguments by KIVY
+                os.environ['KIVY_NO_ARGS'] = '1'
+                # Specify the working directory of KIVY
+                self.pkg_info.make_subdirs('pkg_sysconfdir', 0o755, True, 'kivy')
+                os.environ['KIVY_HOME'] = self.pkg_info.concat_path('pkg_sysconfdir', 'kivy')
+                # Control the standard output by KIVY
+                if not argprsr.args.verbose:
+                    os.environ['KIVY_NO_CONSOLELOG'] = '1'
+                # Specify the location of log output by KIVY
+                import kivy.config
+                kivy.config.Config.set("kivy", "log_dir", self.pkg_info.pkg_logdir)
+                # Load kivy module here otherwise the KIVY settings above is not effective.
+                import kivy.app
+                import kivy.uix.widget
+                import kivy.properties
+                # Specify the KV file to be loaded.
+                kv_dir=self.pkg_info.pkg_runstatedir
+                kv_file=self.pkg_info.concat_path('pkg_datadir',
+                                                  os.path.basename(self.name_invoked)+'.kv')
+                # Define Application clase by inheriting `kivy.app.App`
+                class MainGUIApp(kivy.app.App):
+        
+                    def __init__(self, app_info, kv_dir, **kwargs):
+                        super().__init__(kv_directory=kv_dir, **kwargs)
+                        self.app_info = app_info
+                        
+                    # Sample code to utilize "notify" by plyer module
+                    def notify(self, **args):
+                        print (args)
+                        ntfctn_thread = threading.Thread(target=plyer.notification.notify, 
+                                                         kwargs=args)
+                        ntfctn_thread.start()
+        
+                # Define Main Widget by inheriting `kivy.uix.widget.Widget`
+                class MainWidget(kivy.uix.widget.Widget):
+        
+                    KEYWORDS = ['pkg_name', 'pkg_path', 'prefix', 'MECH', 'Python', 'Argv']
+            
+                    status_text = { x: kivy.properties.StringProperty() for x in KEYWORDS }
+        
+                    def __init__(self, **kwargs):
+                        super().__init__(**kwargs)
+                        for x in self.KEYWORDS:
+                            self.status_text[x] = kivy.app.App.get_running_app().app_info[x]
+        
+                # Create the instance of GUI application class
+                main_app = MainGUIApp(app_info=app_info, kv_dir=kv_dir, kv_file=kv_file)
+        
+                # Sample code to utilize "notify" by plyer module
+                main_app.notify(title='Application start', 
+                                message=app_info['MECH'],
+                                app_name=app_info['pkg_name'],
+                                timeout=10)
+        
+                # Start main-loop of the GUI application instance
+                main_app.run()
+        
+        
+            # Example of the enciphered data storage
+            class EncDataMgr(enc_ds.EncDataStorage):
+                """
+                EncDataMgr: Storing HTTP passwords
+                """
+        
+                def __init__(self, pkg_info:pkgstruct.PkgStruct, **args):
+                    self.conf = {
+                        'storage_name':            pkg_info.script_basename,
+                        'storage_masterkey':       pkg_info.script_basename + 'AburaKataBura',
+                        'data_identifier':         pkg_info.script_basename + '_config',
+                        'key_id':                  pkg_info.script_basename+"@"+'host.jp',
+                        'key_bits':                4096, # 8192,
+                        'key_file_basename':       'id_rsa_'+pkg_info.script_basename,
+                        'keypath_prefix':          pkg_info.concat_path('pkg_sysconfdir', 'pki'),
+                    }
+                    self.conf.update(dict(args))
+                    super().__init__(**self.conf)
+                    self.io_format = 'json'
+                    self.path      = pkg_info.concat_path('pkg_statedatadir', 'auth', 
+                                                          'auth_data.' + self.io_format)
+                    return
+        
+                def setup(self, **args):
+                    """
+                    Setup the SSHKeyring and Initial Data structure
+                    """
+                    empty_data = { self.conf['data_identifier']: {'auth_info': {}}}
+                    self.setup_sshkeyinfo()
+                    # self.set_cipher_unit()
+                    self.set_datatree(base_obj=args.get('init_data', empty_data))
+                    if os.path.exists(self.path):
+                        self.read_datatree(update=True, getall=True,
+                                           decipher=False, decipher_entire_data=True)
+                        self.decipher(entire_data=True, verbose=False)
+                    return
+        
+                def save(self):
+                    """
+                    Saving the enciphered data to file
+                    """
+                    self.encipher(entire_data=True, verbose=False)
+                    self.save_datatree()
+                    self.decipher(entire_data=True, verbose=False)
+                    return
+        
+                def add_argparser_options(self, arg_parser):
+                    """
+                    Define Command-line arguments for manipurating the enciphered data
+                    """
+                    arg_parser.add_argument('--set-password',  action='store_true', help='Set password mode')
+                    arg_parser.add_argument('--erase-password', action='store_true', help='Set password mode')
+                    arg_parser.add_argument('--dump-password', action='store_true', help='Show password mode')
+                    arg_parser.add_argument('-u', '--user', help='http/https auth username')
+                    arg_parser.add_argument('-p', '--password', help='http/https auth password')
+                    arg_parser.add_argument('-U', '--url', help='URL to set password')
+                    return
+        
+                def ls_argparser_attrs(self):
+                    """
+                    List of Command-line arguments so that it can be used for
+                     argparse_extd.ArgumentParserExtd.append_write_config_exclude()
+                    """
+                    return ['--set-password', 
+                            '--erase-password',
+                            '--dump-password',
+                            '--user', '--password', '--url']
+        
+                def store_auth_password(self, args):
+                    """
+                    Add data to the data_tree for enciphered_data
+                    """
+                    usr = args.user if hasattr(args, 'user') else ''
+                    url = args.url  if hasattr(args, 'url')  else ''
+                    pswd = (args.password 
+                            if (hasattr(args, 'password') and args.password )
+                            else  getpass.getpass(prompt=f'Password for {usr}@{url}: '))
+                    buf = {'url': url, 'user': usr, 'password': pswd }
+                    node_key = (self.conf['data_identifier'], 'auth_info', )
+                    if not url:
+                        return -1
+        
+                    if self.datatree.is_validkey(keyset=node_key,
+                                                 leaf_node=False, negate=True):
+                        self.datatree[node_key] = {}
+        
+                    self.datatree[node_key].update({(url,usr): buf})
+        
+                    return 0
+        
+                def erase_auth_password(self, args, url=None, user=None):
+                    """
+                    Erase data from the data_tree for enciphered_data
+                    """
+                    url = ( url if url  else
+                            (args.url  if hasattr(args, 'url')  else ''))
+        
+                    usr = ( user if user  else
+                            (args.user  if hasattr(args, 'user')  else ''))
+        
+                    parent_key = (self.conf['data_identifier'], 'auth_info')
+                    node_key   = parent_key+((url,usr),)
+        
+                    if not url:
+                        return -1
+        
+                    if self.datatree.is_validkey(keyset=node_key,
+                                                 leaf_node=False, negate=True):
+                        return -1
+        
+                    self.datatree[parent_key].pop( (url,usr) )
+                    return 0
+        
+                def dump_auth_password(self, args):
+                    """
+                    Example of accessing data from the data_tree for enciphered_data
+                    """
+                    node_key = (self.conf['data_identifier'], 'auth_info',)
+                    for k,v in self.datatree[node_key].items():
+                        print(k, v)
+                    return 0
+        
+                def manage_auth_password(self, args):
+                    """
+                    Define the application behavior to manipulate the enciphered data storage
+                    Return status := True if the defined procedure has been executed 
+                                          else False
+                    """
+                    if hasattr(args, 'set_password') and args.set_password:
+                        status = self.store_auth_password(args=args)
+                        if status:
+                            if hasattr(args, 'verbose') and args.verbose:
+                                sys.stderr.write(f'Set-password Error: status=={status}\n')
+                        else:
+                            self.save()
+                        return True
+                    if hasattr(args, 'erase_password') and args.erase_password:
+                        status = self.erase_auth_password(args, url=None, user=None)
+                        if status:
+                            if hasattr(args, 'verbose') and args.verbose:
+                                sys.stderr.write(f'Erase-password Error: status=={status}\n')
+                        else:
+                            p_key = (self.conf['data_identifier'], 'auth_info')
+                            
+                            print (self.datatree[p_key])
+        
+                            if len(self.datatree[p_key])<1:
+                                if hasattr(args, 'verbose') and args.verbose:
+                                    sys.stderr.write(f'Erase-password: No password data remaining. Remove file : {self.path}\n')
+                                if hasattr(args, 'dry_run') and args.dry_run:
+                                    sys.stderr.write(f'os.remove({self.path})\n')
+                                else:
+                                    os.remove(self.path)
+                            else:
+                                self.save()
+        
+                        return True
+        
+                    if args.dump_password:
+                        self.dump_auth_password(args)
+                        return True
+        
+                    return False
+        
+        #
+        # Invoke the main routine when this file is executed
+        #    
+        if __name__ == '__main__':
+            ____SCRIPT_CAPITAL_SYMBOLIZED____Framework().main()
+
+        ########## ____PY_MAIN_APP_FRAMEWORK_TEMPLATE_END____ ##########
+
+
+        ########## ____PY_MAIN_KVFILE_TEMPLATE_START____ ##########
+        """
+        #
+        # Kivy Widget definition: ____APPNAME____
+        #
+        MainWidget:
+        
+        <MainWidget>:
+            BoxLayout:
+                orientation: 'vertical'
+                size: self.parent.size
+        
+                BoxLayout:
+                    size_hint: 1.0, 0.85
+                    orientation: 'vertical'
+        
+                    BoxLayout:
+                        size_hint: 1.0, 0.2
+                        Label:
+                            id: status_label_Python
+                            size_hint: 0.2, 1.0
+                            text_size: self.size
+                            halign: 'center'
+                            valign: 'middle'
+        
+                            text: 'Python'
+        
+                        Label:
+                            id: status_text_Python
+                            size_hint: 0.8, 1.0
+                            text_size: self.size
+                            halign: 'left'
+                            valign: 'middle'
+        
+                            text: root.status_text['Python']
+                    BoxLayout:
+                        size_hint: 1.0, 0.2
+                        Label:
+                            id: status_label_Argv
+                            size_hint: 0.2, 1.0
+                            text_size: self.size
+                            halign: 'center'
+                            valign: 'middle'
+        
+                            text: 'Argv'
+        
+                        Label:
+                            id: status_text_Argv
+                            size_hint: 0.8, 1.0
+                            text_size: self.size
+                            halign: 'left'
+                            valign: 'middle'
+        
+                            text: root.status_text['Argv']
+        
+                    BoxLayout:
+                        size_hint: 1.0, 0.2
+                        Label:
+                            id: status_label_MECH
+                            size_hint: 0.2, 1.0
+                            text_size: self.size
+                            halign: 'center'
+                            valign: 'middle'
+        
+                            text: 'MECH'
+        
+                        Label:
+                            id: status_text_MECH
+                            size_hint: 0.8, 1.0
+                            text_size: self.size
+                            halign: 'left'
+                            valign: 'middle'
+        
+                            text: root.status_text['MECH']
+                            
+                    BoxLayout:
+                        size_hint: 1.0, 0.2
+                        Label:
+                            id: status_label_pkg_name
+                            size_hint: 0.2, 1.0
+                            text_size: self.size
+                            halign: 'center'
+                            valign: 'middle'
+        
+                            text: 'pkg_name'
+                            
+                        Label:
+                            id: status_text_pkg_name
+                            size_hint: 0.8, 1.0
+                            text_size: self.size
+                            halign: 'left'
+                            valign: 'middle'
+        
+                            text: root.status_text['pkg_name']
+            
+                    BoxLayout:
+                        size_hint: 1.0, 0.2
+                        Label:
+                            id: status_label_pkg_path
+                            size_hint: 0.2, 1.0
+                            text_size: self.size
+                            halign: 'center'
+                            valign: 'middle'
+        
+                            text: 'pkg_path'
+        
+                        Label:
+                            id: status_text_pkg_path
+                            size_hint: 0.8, 1.0
+                            text_size: self.size
+                            halign: 'left'
+                            valign: 'middle'
+        
+                            text: root.status_text['pkg_path']
+            
+                    BoxLayout:
+                        size_hint: 1.0, 0.2
+                        Label:
+                            id: status_label_prefix
+                            size_hint: 0.2, 1.0
+                            text_size: self.size
+                            halign: 'center'
+                            valign: 'middle'
+        
+                            text: 'prefix'
+        
+                        Label:
+                            id: status_text_prefix
+                            size_hint: 0.8, 1.0
+                            text_size: self.size
+                            halign: 'left'
+                            valign: 'middle'
+        
+                            text: root.status_text['prefix']
+        
+                Button:
+                    size_hint: 1.0, 0.05
+                    text: "Quit"
+                    on_press: app.stop()
+        
+    
+        """
+        ########## ____PY_MAIN_KVFILE_TEMPLATE_END____ ##########
         
         ########## ____PY_LIB_SCRIPT_TEMPLATE_START____ ##########
         #### ____py_shebang_pattern____ ####
@@ -3944,6 +4621,15 @@ if __name__=='__main__':
             help(intrinsic_formatter)
                     
         ########## ____INTRINSIC_FORMATTER_TEMPLATE_END____ ##########
+
+        ########## ____STREAMEXTD_TEMPLATE_START____ ##########
+        #
+        # Show help of class when directly invoked.
+        #
+        if __name__ == '__main__':
+            help(StreamExtd)
+
+        ########## ____STREAMEXTD_TEMPLATE_END____ ##########
 
         #
         # Template data for module 
