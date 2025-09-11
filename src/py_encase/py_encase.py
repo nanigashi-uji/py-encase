@@ -27,7 +27,7 @@ import keyword
 
 class PyEncase(object):
 
-    VERSION          = '0.0.11'
+    VERSION          = '0.0.12'
     PIP_MODULE_NAME  = 'py-encase'
     ENTYTY_FILE_NAME = pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name
     #    ENTYTY_FILE_NAME = pathlib.Path(__file__).resolve().name
@@ -959,7 +959,7 @@ class PyEncase(object):
             rmlist.append(self.tmpdir)
             
         if flg_verbose or flg_dry_run:
-            self.stderr.write("s : '%s'" % (subcmd, ", ".join([str(x) for x in rmlist])))
+            self.stderr.write("%s : '%s'" % (subcmd, ", ".join([str(x) for x in rmlist])))
         for pdir in rmlist:
             self.__class__.remove_dircontents(path_dir=pdir, 
                                               dir_itself=False,
