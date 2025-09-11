@@ -27,7 +27,7 @@ import keyword
 
 class PyEncase(object):
 
-    VERSION          = '0.0.9'
+    VERSION          = '0.0.10'
     PIP_MODULE_NAME  = 'py-encase'
     ENTYTY_FILE_NAME = pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name
     #    ENTYTY_FILE_NAME = pathlib.Path(__file__).resolve().name
@@ -203,15 +203,24 @@ class PyEncase(object):
 
             self.run_script(script=scriptname, args=rest)
         else:
-            argprsrm = argparse.ArgumentParser(add_help=False, exit_on_error=False)
-            argprsrm.add_argument('-P', '--python', default=None, help='Python path / command')
-            argprsrm.add_argument('-I', '--pip',  default=None, help='PIP path / command')
+
+            if self.flg_symlink:
+                prog = os.path.basename(self.path_invoked.name)
+            else:
+                prog = ' '.join([os.path.basename(self.path_invoked.name), self.MNG_OPT])
+                
+            argprsrm = argparse.ArgumentParser(prog=prog, add_help=False, exit_on_error=False)
+
             argprsrm.add_argument('-p', '--prefix',  default=None, help=('prefix of the directory tree. ' +
                                                                          '(Default: Grandparent directory' +
                                                                          ' if the name of parent directory of %s is bin,'
                                                                          ' otherwise current working directory.' 
                                                                          % (self.path_invoked.name, )))
+
+            argprsrm.add_argument('-P', '--python', default=None, help='Python path / command')
+            argprsrm.add_argument('-I', '--pip',  default=None, help='PIP path / command')
             argprsrm.add_argument('-G', '--git-command', default=None, help='git path / command')
+
             argprsrm.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
             argprsrm.add_argument('-n', '--dry-run', action='store_true', help='Dry Run Mode')
 
@@ -246,33 +255,25 @@ class PyEncase(object):
             parser_contents.add_argument('-m', '--modules-src', action='store_true', help='Show module sources')
             parser_contents.set_defaults(handler=self.show_contents)
 
-            parser_init = sbprsrs.add_parser('init', help='Initialise Environment')
-            parser_init.add_argument('-P', '--python', default=None, help='Python path / command')
-            parser_init.add_argument('-I', '--pip',  default=None, help='PIP path / command')
+            parser_init = sbprsrs.add_parser('init', help='Initialise python script environment')
             parser_init.add_argument('-p', '--prefix',  default=self.prefix, help=('prefix of the directory tree. ' +
                                                                                        '(Default: Grandparent directory' +
                                                                                        ' if the name of parent directory of %s is bin,'
                                                                                        ' otherwise current working directory.' 
                                                                                        % (self.path_invoked.name, )))
-            parser_init.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
-            parser_init.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
-            parser_init.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
 
+            parser_init.add_argument('-t', '--title',  help='Project title')
 
-            parser_init.add_argument('-M', '--move', action='store_true', help='moving this script body into instead of copying')
-            parser_init.add_argument('-g', '--git',  action='store_true', help='setup files for git')
-
-            self.__class__.GitIF.add_remoteif_arguments(arg_parser=parser_init)
-            #self.__class__.GitIF.add_invokeoptions_arguments(arg_parser=parser_init)
-            
-            parser_init.add_argument('-r', '--readme', action='store_true',        help='setup/update README.md')
-
-            parser_init.add_argument('-F', '--app-framework', action='store_true', default=False, help='Use template with application framework')
-            parser_init.add_argument('-B', '--bare-script',   action='store_false', dest='app_framework', help='Use template without application framework')
+            parser_init.add_argument('-F', '--app-framework', action='store_true', default=False, 
+                                     help='Use template with application framework')
+            parser_init.add_argument('-B', '--bare-script',   action='store_false', dest='app_framework',
+                                     help='Use template without application framework')
             parser_init.add_argument('-K', '--gui-kvfile', type=str, nargs='?', const=None, default='',
                                          help='Add sample KV file for GUI aplication')
 
-            parser_init.add_argument('-t', '--title',  help='Project title')
+
+            parser_init.add_argument('-r', '--readme', action='store_true',        help='setup/update README.md')
+
             parser_init.add_argument('-m', '--module', default=[], action='append', help='install module by pip')
             parser_init.add_argument('-O', '--required-module', action='store_true', help='install module used in the template by pip')
             parser_init.add_argument('-s', '--script-lib', default=[], action='append', help='install library script from template.')
@@ -280,27 +281,37 @@ class PyEncase(object):
                                                                                               ' '.join(['-s %s' % (m, ) for m 
                                                                                                         in self.__class__.SCRIPT_STD_LIB.keys() ])
                                                                                               +')"'))
+
+            parser_init.add_argument('-g', '--git',  action='store_true', help='setup files for git')
+            self.__class__.GitIF.add_remoteif_arguments(arg_parser=parser_init)
+            #self.__class__.GitIF.add_invokeoptions_arguments(arg_parser=parser_init)
+            
+            parser_init.add_argument('-M', '--move', action='store_true', help='moving this script body into instead of copying')
+
+            parser_init.add_argument('-P', '--python', default=None, help='Python path / command')
+            parser_init.add_argument('-I', '--pip',  default=None, help='PIP path / command')
+            parser_init.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
+
+            parser_init.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
+            parser_init.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+
             parser_init.add_argument('scriptnames', nargs='*', help='script file name to be created')
             parser_init.set_defaults(handler=self.manage_env)
             
-            parser_add = sbprsrs.add_parser('add', help='add new script files')
-            parser_add.add_argument('-P', '--python', default=None, help='Python path / command')
-            parser_add.add_argument('-I', '--pip',  default=None, help='PIP path / command')
+            parser_add = sbprsrs.add_parser('add', help='add new python script files')
             parser_add.add_argument('-p', '--prefix',  default=self.prefix, help=('prefix of the directory tree. ' +
                                                                                       '(Default: Grandparent directory' +
                                                                                       ' if the name of parent directory of %s is bin,'
                                                                                       ' otherwise current working directory.' 
                                                                                       % (self.path_invoked.name, )))
-            parser_add.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
-            parser_add.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
-            parser_add.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
-
             parser_add.add_argument('-r', '--readme', action='store_true', help='setup/update README.md')
 
-            parser_add.add_argument('-F', '--app-framework', action='store_true',  default=False, help='Use template with application framework')
-            parser_add.add_argument('-B', '--bare-script',   action='store_false', dest='app_framework', help='Use template without application framework')
+            parser_add.add_argument('-F', '--app-framework', action='store_true',  default=False,
+                                    help='Use template with application framework')
+            parser_add.add_argument('-B', '--bare-script',   action='store_false', dest='app_framework',
+                                    help='Use template without application framework')
             parser_add.add_argument('-K', '--gui-kvfile', type=str, nargs='?', const=None, default=None,
-                                         help='Add sample KV file for GUI aplication')
+                                    help='Add sample KV file for GUI aplication')
 
             parser_add.add_argument('-m', '--module', default=[], action='append', help='install module by pip')
             parser_add.add_argument('-s', '--script-lib', default=[], action='append', help='install library script from template.')
@@ -309,30 +320,42 @@ class PyEncase(object):
                                                                                                        in self.__class__.SCRIPT_STD_LIB.keys() ])
                                                                                              +'"'))
 
-            parser_add.add_argument('scriptnames', nargs='+', help='all files')
+            parser_add.add_argument('-P', '--python', default=None, help='Python path / command')
+            parser_add.add_argument('-I', '--pip',  default=None, help='PIP path / command')
+            parser_add.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
+
+            parser_add.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
+            parser_add.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+
+            parser_add.add_argument('scriptnames', nargs='+', help='script file name to be created')
             parser_add.set_defaults(handler=self.manage_env)
 
-            parser_addlib = sbprsrs.add_parser('addlib', help='add new script files')
-            parser_addlib.add_argument('-P', '--python', default=None, help='Python path / command')
-            parser_addlib.add_argument('-I', '--pip',  default=None, help='PIP path / command')
+            parser_addlib = sbprsrs.add_parser('addlib', help='add new python library-script files')
+
             parser_addlib.add_argument('-p', '--prefix',  default=self.prefix, help=('prefix of the directory tree. ' +
                                                                                          '(Default: Grandparent directory' +
                                                                                          ' if the name of parent directory of %s is bin,'
                                                                                          ' otherwise current working directory.' 
                                                                                          % (self.path_invoked.name, )))
-            parser_addlib.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
-            parser_addlib.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
-            parser_addlib.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+
             parser_addlib.add_argument('-r', '--readme', action='store_true', help='setup/update README.md')
             parser_addlib.add_argument('-m', '--module', default=[], action='append', help='install module by pip')
             parser_addlib.add_argument('-S', '--std-script-lib', action='store_true', help=('install standard library scripts. (equivalent to "' +
                                                                                                 ' '.join(['-s %s' % (m, ) for m 
                                                                                                           in self.__class__.SCRIPT_STD_LIB.keys() ])
                                                                                                 +'"'))
-            parser_addlib.add_argument('script_lib', nargs='+', help='all files')
+
+            parser_addlib.add_argument('-P', '--python', default=None, help='Python path / command')
+            parser_addlib.add_argument('-I', '--pip',  default=None, help='PIP path / command')
+            parser_addlib.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
+
+            parser_addlib.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
+            parser_addlib.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+
+            parser_addlib.add_argument('script_lib', nargs='+', help='library-script file name to be created')
             parser_addlib.set_defaults(handler=self.manage_env)
 
-            parser_addkv = sbprsrs.add_parser('addkv', help='add new script files')
+            parser_addkv = sbprsrs.add_parser('addkv', help='add new KIVY (KV-language) files')
             parser_addkv.add_argument('-p', '--prefix',  default=self.prefix, help=('prefix of the directory tree. ' +
                                                                                         '(Default: Grandparent directory' +
                                                                                          ' if the name of parent directory of %s is bin,'
@@ -340,35 +363,23 @@ class PyEncase(object):
                                                                                          % (self.path_invoked.name, )))
             parser_addkv.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
             parser_addkv.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
-            parser_addkv.add_argument('kvfiles', nargs='+', help='all files')
+
+            parser_addkv.add_argument('kvfiles', nargs='+', help='KV-file names to be created')
             parser_addkv.set_defaults(handler=self.manage_env)
 
 
-            parser_newmodule = sbprsrs.add_parser('newmodule', help='add new module source')
-            parser_newmodule.add_argument('-P', '--python', default=None, help='Python path / command')
-            parser_newmodule.add_argument('-I', '--pip',  default=None, help='PIP path / command')
+            parser_newmodule = sbprsrs.add_parser('newmodule', help='add new python-module source')
+
             parser_newmodule.add_argument('-p', '--prefix',  default=self.prefix, help=('prefix of the directory tree. ' +
                                                                                             '(Default: Grandparent directory' +
                                                                                             ' if the name of parent directory of %s is bin,'
                                                                                             ' otherwise current working directory.' 
                                                                                             % (self.path_invoked.name, )))
-            parser_newmodule.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
-            parser_newmodule.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
-            parser_newmodule.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
 
-            parser_newmodule.add_argument('-S', '--set-shebang', action='store_true', help='Set shebang based on the local environment')
-
-            parser_newmodule.add_argument('-Q', '--no-readme', action='store_false', dest='readme',
-                                              default='True', help='NO README.md created')
-            parser_newmodule.add_argument('-b', '--no-git-file', action='store_false', dest='git',
-                                              default='True', help='NO README.md created')
-            
-            self.__class__.GitIF.add_remoteif_arguments(arg_parser=parser_newmodule)
-            #self.__class__.GitIF.add_invokeoptions_arguments(arg_parser=parser_newmodule)
+            parser_newmodule.add_argument('-t', '--title',        help='Project title')
+            parser_newmodule.add_argument('-d', '--description',  help='Project description')
 
             parser_newmodule.add_argument('-W', '--module-website', default=[], action='append', help='New module URL')
-            parser_newmodule.add_argument('-d', '--description',  help='Project description')
-            parser_newmodule.add_argument('-t', '--title',        help='Project title')
             parser_newmodule.add_argument('-C', '--class-name', default=[], action='append', help='Module class name')
             parser_newmodule.add_argument('-m', '--module', default=[], action='append', help='required (external) modules used by new modules')
             parser_newmodule.add_argument('-k', '--keywords', default=[], action='append', help='keywords related to new modules')
@@ -378,43 +389,71 @@ class PyEncase(object):
             parser_newmodule.add_argument('-M', '--maintainer-name',  default=[], action='append', help='maintainer name of new modules')
             parser_newmodule.add_argument('-N', '--maintainer-email',  default=[], action='append', help='maintainer email of new modules')
             parser_newmodule.add_argument('-Y', '--create-year', default=[], action='append', help='Year in LICENSE')
-            parser_newmodule.add_argument('module_name', nargs='+', help='new module names')
+
+            parser_newmodule.add_argument('-Q', '--no-readme', action='store_false', dest='readme',
+                                              default='True', help='NO README.md created')
+
+            parser_newmodule.add_argument('-b', '--no-git-file', action='store_false', dest='git',
+                                              default='True', help='NO README.md created')
+            self.__class__.GitIF.add_remoteif_arguments(arg_parser=parser_newmodule)
+            #self.__class__.GitIF.add_invokeoptions_arguments(arg_parser=parser_newmodule)
+
+            parser_newmodule.add_argument('-S', '--set-shebang', action='store_true',
+                                          help='Set shebang based on the local environment')
+
+            parser_newmodule.add_argument('-P', '--python', default=None, help='Python path / command')
+            parser_newmodule.add_argument('-I', '--pip',  default=None, help='PIP path / command')
+            parser_newmodule.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
+
+            parser_newmodule.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
+            parser_newmodule.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+
+            parser_newmodule.add_argument('module_name', nargs='+', help='new module names to be created')
             parser_newmodule.set_defaults(handler=self.setup_newmodule)
+
             
-            parser_updatereadme = sbprsrs.add_parser('update_readme', help='update readme file')
-            parser_updatereadme.set_defaults(handler=self.manage_readme)
-            parser_updatereadme.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
-            parser_updatereadme.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
-            parser_updatereadme.add_argument('-b', '--backup',  action='store_true', help='Keep backup file')
+            parser_updatereadme = sbprsrs.add_parser('update_readme', help='Update readme file')
+
             parser_updatereadme.add_argument('-t', '--title',   help='Title text')
 
+            parser_updatereadme.add_argument('-b', '--backup',  action='store_true', help='Keep backup file')
+            parser_updatereadme.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
+            parser_updatereadme.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+
+            parser_updatereadme.set_defaults(handler=self.manage_readme)
+
+
             parser_init_git = sbprsrs.add_parser('init_git', help='Initialise git repository')
+
+            parser_init_git.add_argument('-m', '--module-src', help='Setup git for specified module source (not working environment)')
+
+            self.__class__.GitIF.add_remoteif_arguments(arg_parser=parser_init_git)
             parser_init_git.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
+
             parser_init_git.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
             parser_init_git.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
-            self.__class__.GitIF.add_remoteif_arguments(arg_parser=parser_init_git)
-            parser_init_git.add_argument('-m', '--module-src', help='Setup git for specified module source')
             parser_init_git.set_defaults(handler=self.manage_git)
 
-            parser_clean = sbprsrs.add_parser('clean', help='clean-up')
 
-            parser_clean.set_defaults(handler=self.clean_env)
+            parser_clean = sbprsrs.add_parser('clean', help='clean-up of the working environment')
             parser_clean.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
             parser_clean.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+            parser_clean.set_defaults(handler=self.clean_env)
 
-            parser_distclean = sbprsrs.add_parser('distclean', help='Entire clean-up')
+            parser_distclean = sbprsrs.add_parser('distclean', help='Entire clean-up of the working environment')
             parser_distclean.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
             parser_distclean.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
             parser_distclean.set_defaults(handler=self.clean_env)
 
             #parser_selfupdate = sbprsrs.add_parser('selfupdate', help='Self update of '+os.path.basename(__file__))
             parser_selfupdate = sbprsrs.add_parser('selfupdate', 
-                                                       help='Self update of '
-                                                       +pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name)
+                                                   help='Self update of '
+                                                   +pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name)
+
+            parser_selfupdate.add_argument('-f', '--force-install', action='store_true', help='Force install')
 
             parser_selfupdate.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
             parser_selfupdate.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
-            parser_selfupdate.add_argument('-f', '--force-install', action='store_true', help='Force install')
 
             parser_selfupdate.set_defaults(handler=self.self_update)
 
