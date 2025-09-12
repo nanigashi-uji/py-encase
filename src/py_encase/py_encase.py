@@ -27,7 +27,7 @@ import keyword
 
 class PyEncase(object):
 
-    VERSION          = '0.0.12'
+    VERSION          = '0.0.13'
     PIP_MODULE_NAME  = 'py-encase'
     ENTYTY_FILE_NAME = pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name
     #    ENTYTY_FILE_NAME = pathlib.Path(__file__).resolve().name
@@ -70,8 +70,12 @@ class PyEncase(object):
                                         'argparse_extd', 'psutil', 'sshkeyring',
                                         'enc_ds', 'plyer', 'pyobjus', 'kivy']
 
+    MODULES_USED_LIB_SCRIPT_TEMPLATE = [] # ['PyYAML']
+
     SCRLIB_USED_MAIN_TEMPLATE       = []
     SCRLIB_USED_MAIN_FRMWK_TEMPLATE = ['streamextd']
+
+    SCRLIB_USED_LIB_SCRIPT_TEMPLATE = []
 
     def __init__(self, argv:list=sys.argv, 
                  python_cmd:str=None, pip_cmd:str=None, 
@@ -282,7 +286,7 @@ class PyEncase(object):
             parser_init.add_argument('-r', '--readme', action='store_true',        help='setup/update README.md')
 
             parser_init.add_argument('-m', '--module', default=[], action='append', help='install module by pip')
-            parser_init.add_argument('-O', '--required-module', action='store_true', help='install module used in the template by pip')
+            parser_init.add_argument('-O', '--required-module', action='store_true', help='install modules/script-libs used in the template by pip')
             parser_init.add_argument('-s', '--script-lib', default=[], action='append', help='install library script from template.')
             parser_init.add_argument('-S', '--std-script-lib', action='store_true', help=('install standard library scripts. (equivalent to "' +
                                                                                               ' '.join(['-s %s' % (m, ) for m 
@@ -321,11 +325,12 @@ class PyEncase(object):
                                     help='Add sample KV file for GUI aplication')
 
             parser_add.add_argument('-m', '--module', default=[], action='append', help='install module by pip')
+            parser_add.add_argument('-O', '--required-module', action='store_true', help='install modules/script-libs used in the template by pip')
             parser_add.add_argument('-s', '--script-lib', default=[], action='append', help='install library script from template.')
             parser_add.add_argument('-S', '--std-script-lib', action='store_true', help=('install standard library scripts. (equivalent to "' +
                                                                                              ' '.join(['-s %s' % (m, ) for m 
                                                                                                        in self.__class__.SCRIPT_STD_LIB.keys() ])
-                                                                                             +'"'))
+                                                                                             +')"'))
 
             parser_add.add_argument('-P', '--python', default=None, help='Python path / command')
             parser_add.add_argument('-I', '--pip',  default=None, help='PIP path / command')
@@ -347,10 +352,11 @@ class PyEncase(object):
 
             parser_addlib.add_argument('-r', '--readme', action='store_true', help='setup/update README.md')
             parser_addlib.add_argument('-m', '--module', default=[], action='append', help='install module by pip')
+            parser_addlib.add_argument('-O', '--required-module', action='store_true', help='install modules/script-libs used in the template by pip')
             parser_addlib.add_argument('-S', '--std-script-lib', action='store_true', help=('install standard library scripts. (equivalent to "' +
                                                                                                 ' '.join(['-s %s' % (m, ) for m 
                                                                                                           in self.__class__.SCRIPT_STD_LIB.keys() ])
-                                                                                                +'"'))
+                                                                                                +')"'))
 
             parser_addlib.add_argument('-P', '--python', default=None, help='Python path / command')
             parser_addlib.add_argument('-I', '--pip',  default=None, help='PIP path / command')
@@ -2271,6 +2277,19 @@ class PyEncase(object):
                             self.__class__.SCRLIB_USED_MAIN_TEMPLATE)
 
             for _scrlib in scrlibs_used:
+                if _scrlib in scrptlibs or (_scrlib+'.py') in scrptlibs:
+                    continue
+                scrptlibs.append(_scrlib)
+
+        if subcmd == ('addlib'):
+            if hasattr(args, 'required_module') and args.required_module:
+                for m in self.__class__.MODULES_USED_LIB_SCRIPT_TEMPLATE:
+                    if m in modules:
+                        continue
+                    modules.append(m)
+
+
+            for _scrlib in self.__class__.SCRLIB_USED_LIB_SCRIPT_TEMPLATE:
                 if _scrlib in scrptlibs or (_scrlib+'.py') in scrptlibs:
                     continue
                 scrptlibs.append(_scrlib)
