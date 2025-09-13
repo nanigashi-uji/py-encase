@@ -1,13 +1,142 @@
 # py-encase
 
-py-encase: Tool for encased python script environment.
+[![PyPI version](https://img.shields.io/pypi/v/py-encase?logo=pypi)](https://pypi.org/project/py-encase/)
+[![Python Versions](https://img.shields.io/pypi/pyversions/py-encase?logo=python)](https://pypi.org/project/py-encase/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Downloads](https://static.pepy.tech/badge/py-encase)](https://pepy.tech/project/py-encase)
+
+**py-encase** is a utility to set up a **portable Python script environment** quickly and consistently.  
+It automates repetitive tasks often required in script development, such as creating directory structures, generating script templates, managing libraries, installing dependencies locally, and initializing Git repositories.
+
+---
+
+## Features
+
+- Create portable script environments under a given prefix
+- Generate script templates and reusable library modules
+- Manage dependencies locally (no need for system-wide pip installs)
+- Initialize Git repositories with remote setup support
+- Keep documentation (`README.md`) updated automatically
+- Support both **script-based tools** and **package/module development**
+
+---
+
+## Installation
+
+```bash
+pip install py-encase
+```
+
+or install into a local sandbox directory:
+
+```bash
+pip install --target ./py_sandbox py-encase
+```
+
+---
 
 ## Requirement
 
   - Python >= 3.9
   - pip3
 
-## Usage
+---
+
+## Usage Examples
+
+### Create a new toolset
+
+```bash
+pip3 install --target "${workdir}/py_sandbox" py-encase
+
+env PYTHONPATH="${workdir}/py_sandbox:" \
+  "${workdir}/py_sandbox/bin/py_encase" --manage init --verbose \
+  --prefix "${workdir}/my-new-tools" \
+  --readme --title "Tools for my work ..." \
+  --app-framework \
+  --module dateutils \
+  --required-module \
+  --script-lib 'my_utils.py' \
+  --setup-git \
+  --git-user-name 'my_git_account' \
+  --git-user-email 'my_git_account@my_git_host.domain' \
+  --git-set-upstream \
+  --git-remote-setup \
+  --git-remote-account remote_account \
+  --git-remote-host remotehost.remotedomain \
+  --git-remote-path '~/git_repositories/' \
+  --git-remote-share group \
+  --git-protocol ssh \
+  my_new_work_tool
+```
+
+### Running Scripts in the Encased Environment
+
+One of the most important features of py-encase is that you do not need to manually set environment variables (such as `PYTHONPATH`) when running your scripts.
+
+When you create a new script using py-encase, a symlink with the script's basename is placed under the `bin/` directory.  
+For example, after creating a script named `my_new_work_tool.py`, you will have:
+
+```
+my-new-tools/
+├── bin/
+│   ├── mng_encase
+│   └── my_new_work_tool   -> symlink to py_encase.py
+├── lib/
+│   └── python/
+│       └── my_new_work_tool.py
+```
+
+You can run your script simply by calling:
+
+```bash
+./bin/my_new_work_tool
+```
+
+The symlink automatically points to `py_encase.py`, which sets up the correct environment variables internally before executing the script.  
+This ensures the script runs inside the encased environment without requiring you to export variables manually.
+
+This mechanism makes py-encase environments self-contained, portable, and easy to run.
+
+---
+
+### Add scripts and libraries
+
+```bash
+"${workdir}/my-new-tools/bin/mng_encase" add -v another_tool
+"${workdir}/my-new-tools/bin/mng_encase" addlib -v util_helpers
+```
+
+### Start module development
+
+```bash
+"${workdir}/my_module_dev/bin/mng_encase" newmodule --verbose \
+  --title "My New Work Utils" \
+  --description "Utility classes for ...." \
+  --module dateutils \
+  --git-user-name 'my_git_account' \
+  --git-user-email 'my_git_account@my_git_host.domain' \
+  --git-set-upstream \
+  --git-remote-setup \
+  --git-remote-account remote_account \
+  --git-remote-host remotehost.remotedomain \
+  --git-remote-path '~/git_repositories' \
+  my_new_work_utils
+```
+
+---
+
+### Configuration via Environment Variables
+
+| Variable | Purpose |
+|----------|---------|
+| `GIT_REMOTE_USER` | Remote git account user name |
+| `GIT_REMOTE_HOST` | Remote git host name |
+| `GIT_REMOTE_PATH` | Path of the remote git repository |
+
+---
+
+## Step-by-step Usage 
 
 1. Initialization of working environment under certain directory
    ("${prefix}") with creating new python script 'newscript.py' from
@@ -77,47 +206,49 @@ sub-commands `clean` or `distclean`
 % ${prefix}bin/mng_encase distclean
 ```
 
-Please refer the help messages for further usage.
+## Subcommands
 
-```
-% ${prefix}/bin/mng_encase --help
+### `init`
+- Bootstraps a new execution environment under a given prefix.
+- Includes directory structure, template script, `bin/` launcher, README, Git initialization.
+- Options: `--readme`, `--title`, `--app-framework`, `--required-module`.
 
-usage: mng_encase [-P PYTHON] [-I PIP] [-p PREFIX] [-G GIT_COMMAND] [-v] [-n] [-h]
-                  {info,init,add,addlib,newmodule,clean,distclean,selfupdate,install,download,freeze,inspect,list,cache,piphelp} ...
+### `add`
+- Adds a new script to an existing environment.
+- Generates from template and symlinks into `bin/` for execution.
 
-positional arguments:
-  {info,init,add,addlib,newmodule,clean,distclean,selfupdate,install,download,freeze,inspect,list,cache,piphelp}
-    info                Show information
-    init                Initialise Environment
-    add                 add new script files
-    addlib              add new script files
-    newmodule           add new module source
-    clean               clean-up
-    distclean           Entire clean-up
-    selfupdate          Self update of py_encase.py
-    install             PIP command : install
-    download            PIP command : download
-    freeze              PIP command : freeze
-    inspect             PIP command : inspect
-    list                PIP command : list
-    cache               PIP command : cache
-    piphelp             PIP command : help
+### `addlib`
+- Adds a one-file library module.
+- For factoring out utilities shared across scripts.
 
-optional arguments:
-  -P PYTHON, --python PYTHON
-                        Python path / command
-  -I PIP, --pip PIP     PIP path / command
-  -p PREFIX, --prefix PREFIX
-                        prefix of the directory tree. (Default:
-                        Grandparent directory if the name of parent
-                        directory of mng_encase is bin, otherwise
-                        current working directory.
-  -G GIT_COMMAND, --git-command GIT_COMMAND
-                        git path / command
-  -v, --verbose         Verbose output
-  -n, --dry-run         Dry Run Mode
-  -h, --help
-```
+### `newmodule`
+- Creates a package-structured Python module (source, tests, docs).
+- Suitable for distributing reusable modules.
+
+### `install`, `download`, `freeze`, `inspect`, `list`, `cache`, `piphelp`
+- Wrappers for pip commands.
+- Manage local installs, caches, dependency locking, inspection.
+
+### `clean`, `distclean`
+- `clean`: remove installed modules/caches for the current Python/pip version.
+- `distclean`: more thorough cleanup.
+
+### `selfupdate`
+- Updates py-encase to the latest version from PyPI.
+
+### `update_readme`
+- Updates `README.md` with project structure and file listings.
+
+### `init_git`
+- Initializes a Git repository with `.gitignore`, `.gitkeep`, user/remote setup.
+
+### `contents`
+- Lists scripts, libraries, modules, installed packages in the environment.
+
+### `info`
+- Shows environment info: versions, paths, directory layout, symlinks.
+
+---
 
 ## Author
     Nanigashi Uji (53845049+nanigashi-uji@users.noreply.github.com)
