@@ -27,7 +27,7 @@ import keyword
 
 class PyEncase(object):
 
-    VERSION          = '0.0.18'
+    VERSION          = '0.0.19'
     PIP_MODULE_NAME  = 'py-encase'
     ENTYTY_FILE_NAME = pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name
     #    ENTYTY_FILE_NAME = pathlib.Path(__file__).resolve().name
@@ -1443,7 +1443,7 @@ class PyEncase(object):
             self.remote_dir      = (opts.git_remote_path if (hasattr(opts, 'git_remote_path')
                                                              and opts.git_remote_path) else
                                     (repository_dir if repository_dir else
-                                     os.environ.get('GIT_REMOTE_DIR', 
+                                     os.environ.get('GIT_REMOTE_PATH', 
                                                     os.path.join('~', 'git_repositories'))))
             self.ssh_account     = (opts.git_remote_account if (hasattr(opts, 'git_remote_account')
                                                              and opts.git_remote_account) else
