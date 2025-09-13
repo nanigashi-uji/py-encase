@@ -27,7 +27,7 @@ import keyword
 
 class PyEncase(object):
 
-    VERSION          = '0.0.17'
+    VERSION          = '0.0.18'
     PIP_MODULE_NAME  = 'py-encase'
     ENTYTY_FILE_NAME = pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name
     #    ENTYTY_FILE_NAME = pathlib.Path(__file__).resolve().name
@@ -2575,9 +2575,6 @@ class PyEncase(object):
         for athr,eml in itertools.zip_longest(maintainer_name, maintainer_email):
             if athr is None or (not athr):
                 break
-            maintainer_text_readme.append("  %s" % (athr, )
-                                          if eml is None or (not eml) 
-                                          else "  %s(%s)\n" % (athr, eml))
             maintainer_text_pyproject.append("{name = %s, email= %s}\n" 
                                              % (repr(athr), repr(eml) if eml is not None else repr("")))
 
