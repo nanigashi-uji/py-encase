@@ -27,7 +27,7 @@ import keyword
 
 class PyEncase(object):
 
-    VERSION          = '0.0.16'
+    VERSION          = '0.0.17'
     PIP_MODULE_NAME  = 'py-encase'
     ENTYTY_FILE_NAME = pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name
     #    ENTYTY_FILE_NAME = pathlib.Path(__file__).resolve().name
@@ -1191,7 +1191,10 @@ class PyEncase(object):
                            protocol=None, account=None, rmtext='.git'):
             url_base = self.guess_repo_url_base(opts=opts, protocol=protocol, account=account)
             mod_path = '_'.join([subdir.replace(os.sep, '_', module)]) if subdir else module
-            return url_base.removesuffix('/')+f'/{module}{rmtext}'
+            rmt_path = f'{mod_path}{rmtext}'
+            if not rmt_path.startswith('/'):
+                rmt_path = '/' +  rmt_path
+            return url_base.removesuffix('/')+rmt_path
     
         def create_repo_cmdargs(self, module, subdir='',
                                 opts:argparse.Namespace=None, description=None,
@@ -1339,7 +1342,10 @@ class PyEncase(object):
                            protocol=None, account=None, rmtext='.git'):
             url_base = self.guess_repo_url_base(opts=opts, protocol=protocol, account=account)
             mod_path = '_'.join([subdir.replace(os.sep, '_', module)]) if subdir else module
-            return url_base.removesuffix('/')+f'/{module}{rmtext}'
+            rmt_path = f'{mod_path}{rmtext}'
+            if not rmt_path.startswith('/'):
+                rmt_path = '/' +  rmt_path
+            return url_base.removesuffix('/')+rmt_path
         
         def create_repo_cmdargs(self, module, subdir='',
                                 opts:argparse.Namespace=None, description=None,
@@ -1558,23 +1564,25 @@ class PyEncase(object):
                                                     and opts.git_remote_port) else
                            (port if port else
                             self.ssh_port if gitrmt_protocol=='ssh' else None))
+
+            urlsep = '' if self.remote_dir_expnd.startswith('/') else '/'
             
-            return ( '%s://%s@%s%s/%s/' % (gitrmt_protocol, gitrmt_account,
+            return ( '%s://%s@%s%s%s%s/' % (gitrmt_protocol, gitrmt_account,
                                            self.remote_host,
                                            ':'+self.ssh_port if self.ssh_port else '',
-                                           self.remote_dir_expnd)
+                                           urlsep, self.remote_dir_expnd.removesuffix('/'))
                      if gitrmt_protocol in ('http', 'https') else
-                     ( '%s://%s@%s%s/%s/' % (gitrmt_protocol, gitrmt_account,
+                     ( '%s://%s@%s%s%s%s/' % (gitrmt_protocol, gitrmt_account,
                                              self.remote_host,
                                              (':'+gitrmt_port) if gitrmt_port else '',
-                                             self.remote_dir_expnd)
+                                             urlsep, self.remote_dir_expnd.removesuffix('/'))
                        if gitrmt_protocol=='ssh' else
-                       ('%s@%s:%s/' % (gitrmt_account, self.remote_host, self.remote_dir)
+                       ('%s@%s:%s/' % (gitrmt_account, self.remote_host, self.remote_dir.removesuffix('/'))
                         if not self.ssh_port else
-                        '%s://%s@%s%s/%s/' % (gitrmt_protocol, gitrmt_account,
+                        '%s://%s@%s%s%s%s/' % (gitrmt_protocol, gitrmt_account,
                                               self.remote_host,
                                               (':'+gitrmt_port) if gitrmt_port else '',
-                                              self.remote_dir_expnd))))
+                                              urlsep, self.remote_dir_expnd.removesuffix('/')))))
         
         def guess_repo_url(self, module, subdir='',
                            opts:argparse.Namespace=None,
@@ -1584,8 +1592,13 @@ class PyEncase(object):
 
             url_base = self.guess_repo_url_base(opts=opts, protocol=protocol,
                                                 account=account, port=port)
-            return url_base.removesuffix('/')+f'/{os.path.join(subdir, module)}{rmtext}'
-        
+            
+            if isinstance(subdir, str):
+                subdir = subdir.removesuffix('/')
+            rmt_path = f'{os.path.join(subdir, module)}{rmtext}'
+            if not rmt_path.startswith('/'):
+                rmt_path = '/' +  rmt_path
+            return url_base.removesuffix('/')+rmt_path
     
         def create_repo_cmdargs(self, module, subdir='',
                                 opts:argparse.Namespace=None, description=None,
@@ -1890,12 +1903,17 @@ class PyEncase(object):
         def remote_repo_url(self, module, subdir='',
                             opts:argparse.Namespace=None,
                             protocol=None, account=None, rmtext='.git'):
+
             if self.gitrmt_if is not None:
                 return self.gitrmt_if.guess_repo_url(module=module, subdir=subdir, opts=opts,
                                                      protocol=protocol, account=account, rmtext=rmtext)
     
-            return self.rmt_url_base.removesuffix('/')+f'/{os.path.join(subdir, module)}{rmtext}'
-
+            if isinstance(subdir, str):
+                subdir = subdir.removesuffix('/')
+            rmt_path = f'{os.path.join(subdir, module)}{rmtext}'
+            if not rmt_path.startswith('/'):
+                rmt_path = '/' +  rmt_path
+            return self.rmt_url_base.removesuffix('/')+rmt_path
 
         def guess_module_name(self, opts:argparse.Namespace=None, module=None):
             return ( opts.git_repository_name
