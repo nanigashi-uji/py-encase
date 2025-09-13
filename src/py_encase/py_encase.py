@@ -27,7 +27,7 @@ import keyword
 
 class PyEncase(object):
 
-    VERSION          = '0.0.15'
+    VERSION          = '0.0.16'
     PIP_MODULE_NAME  = 'py-encase'
     ENTYTY_FILE_NAME = pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name
     #    ENTYTY_FILE_NAME = pathlib.Path(__file__).resolve().name
@@ -1398,7 +1398,7 @@ class PyEncase(object):
                    'git_cmd': 'git'}
     
         reg_top_pttrn   = re.compile(r'^\s*top=\s*')
-        reg_share_pttrn = re.compile(f'^(?P<shareopt>false|true|umask|group|all|world|everybody|\d{3,4})$', re.A)
+        reg_share_pttrn = re.compile(r'^(?P<shareopt>false|true|umask|group|all|world|everybody|\d{3,4})$', re.A)
         
         def __init__(self, 
                      opts:argparse.Namespace=None,
@@ -1473,7 +1473,7 @@ class PyEncase(object):
                     ret = subprocess.run(self.ssh_cmd_common
                                          +['(', 'echo', 'top=', self.remote_dir, ';',
                                            'find', self.remote_dir, 
-                                           '-follow', '\(',  '-name',  '.git',  '-o',  '-name',  'HEAD', '\)'
+                                           '-follow', '\\(',  '-name',  '.git',  '-o',  '-name',  'HEAD', '\\)'
                                            ')'],
                                          check=True, capture_output=True, text=True)
                     if ret.returncode==0:
@@ -2676,8 +2676,8 @@ class PyEncase(object):
             for fname, markerid in text_path_templates:
                 lpath = os.path.join(new_module_top, fname)
                 self.extract_template_with_check(output_path=lpath,
-                                                 template_s_marker=r'\s*#{5,}\s*____'+markerid+'_TEMPLATE_START____\s*#{5,}',
-                                                 template_e_marker=r'\s*#{5,}\s*____'+markerid+'_TEMPLATE_END____\s*#{5,}',
+                                                 template_s_marker=r'\s*#{5,}\s*____'+markerid+r'_TEMPLATE_START____\s*#{5,}',
+                                                 template_e_marker=r'\s*#{5,}\s*____'+markerid+r'_TEMPLATE_END____\s*#{5,}',
                                                  filter_obj=text_filter, dequote=True,
                                                  short_name=fname, verbose=flg_verbose, dry_run=flg_dry_run)
 
@@ -2687,8 +2687,8 @@ class PyEncase(object):
             for fname, markerid in code_path_template:
                 lpath = os.path.join(new_module_top, 'src', module_short_path, fname)
                 self.extract_template_with_check(output_path=lpath,
-                                                 template_s_marker=r'\s*#{5,}\s*____'+markerid+'_TEMPLATE_START____\s*#{5,}',
-                                                 template_e_marker=r'\s*#{5,}\s*____'+markerid+'_TEMPLATE_END____\s*#{5,}',
+                                                 template_s_marker=r'\s*#{5,}\s*____'+markerid+r'_TEMPLATE_START____\s*#{5,}',
+                                                 template_e_marker=r'\s*#{5,}\s*____'+markerid+r'_TEMPLATE_END____\s*#{5,}',
                                                  filter_obj=code_filter, dequote=False,
                                                  short_name=fname, verbose=flg_verbose, dry_run=flg_dry_run)
 
