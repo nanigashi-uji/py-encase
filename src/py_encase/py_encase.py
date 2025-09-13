@@ -27,7 +27,7 @@ import keyword
 
 class PyEncase(object):
 
-    VERSION          = '0.0.13'
+    VERSION          = '0.0.14'
     PIP_MODULE_NAME  = 'py-encase'
     ENTYTY_FILE_NAME = pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name
     #    ENTYTY_FILE_NAME = pathlib.Path(__file__).resolve().name
@@ -1635,11 +1635,11 @@ class PyEncase(object):
             if isinstance(share,str):
                 m = self.__class__.reg_share_pttrn.match(share)
                 if m:
-                    cmd_args.append(f'--share={m.group("shareopt")}')
+                    cmd_args.append(f'--shared={m.group("shareopt")}')
                 elif share:
-                    cmd_args.append('--share')
+                    cmd_args.append('--shared')
             elif share:
-                cmd_args.append('--share')
+                cmd_args.append('--shared')
             cmd_args.extend([rmt_repo_path, ')'])
     
             return cmd_args
@@ -1973,11 +1973,11 @@ class PyEncase(object):
             if isinstance(share,str):
                 m = self.__class__.reg_share_pttrn.match(share)
                 if m:
-                    cmd_args.append(f'--share={m.group("shareopt")}')
+                    cmd_args.append(f'--shared={m.group("shareopt")}')
                 elif share:
-                    cmd_args.append('--share')
+                    cmd_args.append('--shared')
             elif share:
-                cmd_args.append('--share')
+                cmd_args.append('--shared')
             cmd_args.extend([workdir])
             git_cmd_args.append(cmd_args)
 
@@ -3993,6 +3993,7 @@ if __name__=='__main__':
 
         ########## ____PY_MAIN_KVFILE_TEMPLATE_START____ ##########
         """
+        # -*- mode: kivy; -*-
         #
         # Kivy Widget definition: ____APPNAME____
         #
