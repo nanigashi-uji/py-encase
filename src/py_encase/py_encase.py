@@ -27,7 +27,7 @@ import keyword
 
 class PyEncase(object):
 
-    VERSION          = '0.0.14'
+    VERSION          = '0.0.15'
     PIP_MODULE_NAME  = 'py-encase'
     ENTYTY_FILE_NAME = pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name
     #    ENTYTY_FILE_NAME = pathlib.Path(__file__).resolve().name
@@ -293,7 +293,7 @@ class PyEncase(object):
                                                                                                         in self.__class__.SCRIPT_STD_LIB.keys() ])
                                                                                               +')"'))
 
-            parser_init.add_argument('-g', '--git',  action='store_true', help='setup files for git')
+            parser_init.add_argument('-g', '--setup-git',  action='store_true', help='setup files for git')
             self.__class__.GitIF.add_remoteif_arguments(arg_parser=parser_init)
             #self.__class__.GitIF.add_invokeoptions_arguments(arg_parser=parser_init)
             
@@ -404,10 +404,10 @@ class PyEncase(object):
             parser_newmodule.add_argument('-Y', '--create-year', default=[], action='append', help='Year in LICENSE')
 
             parser_newmodule.add_argument('-Q', '--no-readme', action='store_false', dest='readme',
-                                              default='True', help='NO README.md created')
-
-            parser_newmodule.add_argument('-b', '--no-git-file', action='store_false', dest='git',
-                                              default='True', help='NO README.md created')
+                                          default='True', help='NO README.md created')
+            
+            parser_newmodule.add_argument('-b', '--no-git-file', action='store_false', dest='setup_git',
+                                          default='True', help='NO README.md created')
             self.__class__.GitIF.add_remoteif_arguments(arg_parser=parser_newmodule)
             #self.__class__.GitIF.add_invokeoptions_arguments(arg_parser=parser_newmodule)
 
@@ -2250,10 +2250,10 @@ class PyEncase(object):
         flg_verbose = args.verbose if hasattr(args, 'verbose') else self.verbose
         flg_dry_run = args.dry_run if hasattr(args, 'dry_run') else False
 
-        flg_move   = args.move   if hasattr(args, 'move')   else False
-        flg_git    = args.git    if hasattr(args, 'git')    else False
-        flg_readme = args.readme if hasattr(args, 'readme') else False
-        title      = args.title  if hasattr(args, 'title')  else str(pathlib.Path(self.prefix).name)
+        flg_move   = args.move      if hasattr(args, 'move')      else False
+        flg_git    = args.setup_git if hasattr(args, 'setup_git') else False
+        flg_readme = args.readme    if hasattr(args, 'readme')    else False
+        title      = args.title     if hasattr(args, 'title')     else str(pathlib.Path(self.prefix).name)
         
         modules   = args.module      if hasattr(args, 'module')     else []
         scrptlibs = args.script_lib  if hasattr(args, 'script_lib') else []
@@ -2502,8 +2502,8 @@ class PyEncase(object):
         flg_verbose = args.verbose if hasattr(args, 'verbose') else self.verbose
         flg_dry_run = args.dry_run if hasattr(args, 'dry_run') else False
 
-        flg_readme = args.readme if hasattr(args, 'readme') else True
-        flg_git    = args.git    if hasattr(args, 'git')    else True
+        flg_readme = args.readme    if hasattr(args, 'readme')    else True
+        flg_git    = args.setup_git if hasattr(args, 'setup_git') else True
 
         flg_set_shebang = args.set_shebang if hasattr(args, 'set_shebang') else False
 
