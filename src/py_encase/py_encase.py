@@ -24,13 +24,16 @@ import json
 import glob
 import importlib.metadata
 import keyword
+import pkgutil
 
 class PyEncase(object):
 
-    VERSION          = '0.0.20'
+    VERSION          = '0.0.21'
     PIP_MODULE_NAME  = 'py-encase'
-    ENTYTY_FILE_NAME = pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name
-    #    ENTYTY_FILE_NAME = pathlib.Path(__file__).resolve().name
+    ENTITY_FILE      = pathlib.Path(inspect.getsourcefile(inspect.currentframe()))
+    ENTITY_PATH      = ENTITY_FILE.resolve()
+    ENTITY_FILE_NAME = ENTITY_PATH.name
+    #    ENTITY_FILE_NAME = pathlib.Path(__file__).resolve().name
 
     MNG_SCRIPT = 'mng_encase'
     MNG_OPT    = '--manage'
@@ -273,7 +276,10 @@ class PyEncase(object):
                                                                                        ' otherwise current working directory.' 
                                                                                        % (self.path_invoked.name, )))
 
+            
             parser_init.add_argument('-t', '--title',  help='Project title')
+
+            parser_init.add_argument('-D', '--template', help='Template File (default:' + str(self.__class__.ENTITY_FILE)+')')
 
             parser_init.add_argument('-F', '--app-framework', action='store_true', default=False, 
                                      help='Use template with application framework')
@@ -317,6 +323,8 @@ class PyEncase(object):
                                                                                       % (self.path_invoked.name, )))
             parser_add.add_argument('-r', '--readme', action='store_true', help='setup/update README.md')
 
+            parser_add.add_argument('-D', '--template', help='Template File (default:' + str(self.__class__.ENTITY_FILE)+')')
+
             parser_add.add_argument('-F', '--app-framework', action='store_true',  default=False,
                                     help='Use template with application framework')
             parser_add.add_argument('-B', '--bare-script',   action='store_false', dest='app_framework',
@@ -351,6 +359,10 @@ class PyEncase(object):
                                                                                          % (self.path_invoked.name, )))
 
             parser_addlib.add_argument('-r', '--readme', action='store_true', help='setup/update README.md')
+
+
+            parser_addlib.add_argument('-D', '--template', help='Template File (default:' + str(self.__class__.ENTITY_FILE)+')')
+
             parser_addlib.add_argument('-m', '--module', default=[], action='append', help='install module by pip')
             parser_addlib.add_argument('-O', '--required-module', action='store_true', help='install modules/script-libs used in the template by pip')
             parser_addlib.add_argument('-S', '--std-script-lib', action='store_true', help=('install standard library scripts. (equivalent to "' +
@@ -374,6 +386,8 @@ class PyEncase(object):
                                                                                          ' if the name of parent directory of %s is bin,'
                                                                                          ' otherwise current working directory.' 
                                                                                          % (self.path_invoked.name, )))
+            parser_addkv.add_argument('-D', '--template', help='Template File (default:' + str(self.__class__.ENTITY_FILE)+')')
+
             parser_addkv.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
             parser_addkv.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
 
@@ -391,6 +405,8 @@ class PyEncase(object):
 
             parser_newmodule.add_argument('-t', '--title',        help='Project title')
             parser_newmodule.add_argument('-d', '--description',  help='Project description')
+
+            parser_newmodule.add_argument('-D', '--template', help='Template File (default:' + str(self.__class__.ENTITY_FILE)+')')
 
             parser_newmodule.add_argument('-W', '--module-website', default=[], action='append', help='New module URL')
             parser_newmodule.add_argument('-C', '--class-name', default=[], action='append', help='Module class name')
@@ -429,12 +445,15 @@ class PyEncase(object):
 
             parser_updatereadme.add_argument('-t', '--title',   help='Title text')
 
+            parser_updatereadme.add_argument('-D', '--template',
+                                             default=str(self.__class__.ENTITY_PATH),
+                                             help='Template File (default:' + str(self.__class__.ENTITY_FILE)+')')
+
             parser_updatereadme.add_argument('-b', '--backup',  action='store_true', help='Keep backup file')
             parser_updatereadme.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
             parser_updatereadme.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
 
             parser_updatereadme.set_defaults(handler=self.manage_readme)
-
 
             parser_init_git = sbprsrs.add_parser('init_git', help='Initialise git repository')
 
@@ -443,10 +462,21 @@ class PyEncase(object):
             self.__class__.GitIF.add_remoteif_arguments(arg_parser=parser_init_git)
             parser_init_git.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
 
+            parser_init_git.add_argument('-D', '--template', help='Template File (default:' + str(self.__class__.ENTITY_FILE)+')')
+            
             parser_init_git.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
             parser_init_git.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
             parser_init_git.set_defaults(handler=self.manage_git)
 
+            parser_template = sbprsrs.add_parser('dump_template', help='Dump template part')
+
+            parser_template.add_argument('-o', '--output',   help='Output to file (default: sys.stdout)')
+            parser_template.add_argument('-D', '--template', help='Template File (default:' + str(self.__class__.ENTITY_FILE)+')')
+
+            parser_template.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
+            parser_template.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
+
+            parser_template.set_defaults(handler=self.dump_template)
 
             parser_clean = sbprsrs.add_parser('clean', help='clean-up of the working environment')
             parser_clean.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
@@ -461,7 +491,7 @@ class PyEncase(object):
             #parser_selfupdate = sbprsrs.add_parser('selfupdate', help='Self update of '+os.path.basename(__file__))
             parser_selfupdate = sbprsrs.add_parser('selfupdate', 
                                                    help='Self update of '
-                                                   +pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name)
+                                                   +self.__class__.ENTITY_FILE_NAME)
 
             parser_selfupdate.add_argument('-f', '--force-install', action='store_true', help='Force install')
 
@@ -541,10 +571,10 @@ class PyEncase(object):
 
         if self.__class__.version_compare(self.__class__.VERSION, latest_version)<0 or force_install:
             orig_path = self.path_invoked.resolve()
-            if orig_path.name != self.__class__.ENTYTY_FILE_NAME:
+            if orig_path.name != self.__class__.ENTITY_FILE_NAME:
                 self.stderr.write("selfupdate: Current version=='%s', Latest version=='%s', Force install?: %s" %
                                   (self.__class__.VERSION, latest_version, str(force_install)))
-                raise ValueError("Filename is not proper: '"+orig_path.name+"' != '"+self.__class__.ENTYTY_FILE_NAME+"'")
+                raise ValueError("Filename is not proper: '"+orig_path.name+"' != '"+self.__class__.ENTITY_FILE_NAME+"'")
 
             if flg_verbose or dry_run:
                 self.stderr.write("selfupdate: Current version=='%s', Latest version=='%s', Force install?: %s" %
@@ -552,7 +582,7 @@ class PyEncase(object):
 
             new_version_path = os.path.join(self.python_pip_path,
                                             self.__class__.PIP_MODULE_NAME.replace('-', '_'),
-                                            self.__class__.ENTYTY_FILE_NAME)
+                                            self.__class__.ENTITY_FILE_NAME)
             
             if not os.path.isfile(new_version_path):
                 self.stderr.write("selfupdate: Internal error: file not found: '%s'" %
@@ -661,6 +691,20 @@ class PyEncase(object):
                                           self.__class__.VERSION, 
                                           pathlib.Path(__file__).resolve())
 
+    def get_module_template_dirs(self):
+        pkg_name = self.__class__.PIP_MODULE_NAME.replace('-', '_')
+        subdirs = [ 'share', self.__class__.PIP_MODULE_NAME, 'template']
+        cand = [ self.prefix, os.path.join(self.datadir, 'template') ]
+        spec = importlib.util.find_spec(pkg_name)
+
+        for mod in (sys.modules.get(pkg_name),
+                    (importlib._bootstrap._load(spec)
+                     if spec is not None else None)):
+            if mod is None or not hasattr(mod, '__file__'):
+                continue
+            cand.append(os.path.join(mod.__file__, *subdirs))
+        return [ d for d in cand if os.path.isdir(d) ]
+
     def show_info(self, args:argparse.Namespace, rest:list=[]):
 
         flg_verbose            = args.verbose            if hasattr(args, 'verbose')            else self.verbose
@@ -670,7 +714,6 @@ class PyEncase(object):
         flg_manage_script_name = args.manage_script_name if hasattr(args, 'manage_script_name') else False
         flg_manage_option      = args.manage_option      if hasattr(args, 'manage_option')      else False
         flg_pip_module_name    = args.pip_module_name    if hasattr(args, 'pip_module_name')    else False
-
 
         if not(flg_verbose or flg_long):
             if flg_version:
@@ -703,7 +746,7 @@ class PyEncase(object):
         print("Python full path       : ", self.python_use.absolute())
         print("Command invoked        : ", self.path_invoked, "(LINK? : ", self.flg_symlink, ")")
         print("This file              : ", __file__)
-        print("(source)               : ", pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve())
+        print("(source)               : ", self.__class__.ENTITY_PATH)
         print("Top of work directory  : ", self.prefix)
         print("bin directory          : ", self.bindir)
         print("var directory          : ", self.vardir)
@@ -711,6 +754,7 @@ class PyEncase(object):
         print("data directory         : ", self.datadir)
         print("tmp directory          : ", self.tmpdir)
         print("log directory          : ", self.logdir)
+        print("template path          : ", self.get_module_template_dirs())
         print("script directory       : ", self.python_path)
         print("python module directory: ", self.python_pip_path)
         print("PIP command            : ", str(self.pip_use))
@@ -815,7 +859,7 @@ class PyEncase(object):
     def put_this_into_structure(self, flg_move=False, dry_run=False, verbose=False):
 
         #orig_path   = pathlib.Path(__file__).resolve() # self.path_invoked.absolute().name
-        orig_path   = pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve()
+        orig_path   = self.__class__.ENTITY_PATH
         script_dest = os.path.join(self.bindir, orig_path.name)
         
         if os.path.exists(script_dest):
@@ -849,7 +893,7 @@ class PyEncase(object):
                                     dry_run=False, verbose=False):
         #entiry_name = self.path_invoked.resolve().name
         #entiry_name = pathlib.Path(__file__).resolve().name
-        entiry_name = pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name
+        entiry_name = self.__class__.ENTITY_FILE_NAME
         link_dest   = os.path.join(self.bindir, 
                                    link_name.removesuffix('.py')
                                    if strip_py and link_name.endswith('.py') else link_name)
@@ -950,6 +994,54 @@ class PyEncase(object):
         else:
             cls.StreamExtd().stderr.write("Error: Unknown file type: '%s'" % (pdir.name, ))
             # raise(NotADirectoryError)
+
+        return
+
+    def seek_template_file(self, args:argparse.Namespace, option='template', env_val='PY_ENCASE_TEMPLATE'):
+
+        tmplt_file = args.template if hasattr(args, option) else os.environ.get(env_val)
+        if tmplt_file is None:
+            return None
+        if ((tmplt_file.startswith('./') or tmplt_file.startswith('/'))
+             and os.path.exists(tmplt_file)):
+            return tmplt_file
+        for d in self.get_module_template_dirs():
+            tmp_path = os.path.join(str(d), *tmplt_file.split(os.sep))
+            if os.path.exists(tmp_path):
+                return tmp_path
+
+        self.stderr.write("Can not find template file (Use Defaults): %s" % (tmplt_file))
+
+        return None
+
+    def dump_template(self, args:argparse.Namespace, rest:list=[]):
+
+        subcmd      = args.subcommand if hasattr(args, 'subcommand') else 'unknown'
+
+        tmplt_file  = self.seek_template_file(args, option='template', env_val='PY_ENCASE_TEMPLATE')
+
+        output_file = args.output   if hasattr(args, 'output')      else None
+
+        flg_verbose = args.verbose if hasattr(args, 'verbose') else self.verbose
+        flg_dry_run = args.dry_run if hasattr(args, 'dry_run') else False
+
+        header  = '#\n'
+        header += '# File Template : '+self.__class__.ENTITY_FILE_NAME+'\n'
+        header += '#\n'
+        header += 'if False:\n'
+
+        footer = None
+        indent = 1
+        if flg_verbose or flg_dry_run:
+            self.stderr.write("dump_template: Input_file=='%s', Output File=='%s'"
+                              % ((str(self.__class__.ENTITY_FILE )
+                                  if tmplt_file is None else tmplt_file), 
+                                 ('sys.stdout' if output_file is None else output_file)))
+        if not flg_dry_run:
+            self.dump_template_contents(outfile=output_file, infile=tmplt_file, 
+                                        header=header, footer=footer, indent=indent, encoding=self.encoding)
+
+        return
 
     def clean_env(self, args:argparse.Namespace, rest:list=[]):
         subcmd = args.subcommand if hasattr(args, 'subcommand') else 'unknown'
@@ -2272,6 +2364,8 @@ class PyEncase(object):
         flg_git    = args.setup_git if hasattr(args, 'setup_git') else False
         flg_readme = args.readme    if hasattr(args, 'readme')    else False
         title      = args.title     if hasattr(args, 'title')     else str(pathlib.Path(self.prefix).name)
+
+        tmplt_file  = self.seek_template_file(args, option='template', env_val='PY_ENCASE_TEMPLATE')
         
         modules   = args.module      if hasattr(args, 'module')     else []
         scrptlibs = args.script_lib  if hasattr(args, 'script_lib') else []
@@ -2374,9 +2468,10 @@ class PyEncase(object):
                                              dry_run=flg_dry_run, verbose=flg_verbose)
 
             if flg_git:
-
+                
                 self.make_gitignore_contents(os.path.join(self.prefix, '.gitignore'),
-                                             encoding=self.encoding, dry_run=flg_dry_run, verbose=flg_verbose)
+                                             input_file=tmplt_file, encoding=self.encoding,
+                                             dry_run=flg_dry_run, verbose=flg_verbose)
             
                 self.put_gitkeep(dry_run=flg_dry_run, verbose=flg_verbose)
                 # self.setup_git(git_user=git_user, git_email=git_email, git_url=git_url,
@@ -2392,24 +2487,24 @@ class PyEncase(object):
 
         if flg_readme:
 
-            readme_path = self.update_readme(keywords=keyword_buf,
+            readme_path = self.update_readme(keywords=keyword_buf, input_file=tmplt_file,
                                              bin_basenames=[x.removesuffix('.py') for x in scripts],
                                              lib_basenames=[x.removesuffix('.py') for x in scrptlibs],
                                              flg_git=flg_git, backup=False,
                                              verbose=flg_verbose, dry_run=flg_dry_run)
 
         self.add_pyscr(basename=[x.removesuffix('.py') for x in scripts],
-                       keywords=keyword_buf, use_framework=flg_frmwk,
-                       verbose=flg_verbose, dry_run=flg_dry_run)
+                       input_file=tmplt_file, keywords=keyword_buf,
+                       use_framework=flg_frmwk, verbose=flg_verbose, dry_run=flg_dry_run)
                 
         self.add_pylib(basename=[x.removesuffix('.py') for x in scrptlibs],
-                       keywords=keyword_buf, verbose=flg_verbose, dry_run=flg_dry_run)
+                       input_file=tmplt_file, keywords=keyword_buf,
+                       verbose=flg_verbose, dry_run=flg_dry_run)
 
 
         self.create_kvfile(kvfiles=kvfiles,
-                           kivy_home=None,
-                           template_s_marker=None,
-                           templete_e_marker=None,
+                           input_file=tmplt_file, kivy_home=None,
+                           template_s_marker=None, templete_e_marker=None,
                            dry_run=flg_dry_run, verbose=flg_verbose)
 
         if len(modules)>0:
@@ -2430,6 +2525,8 @@ class PyEncase(object):
         title      = ( args.title if (hasattr(args, 'title') and args.title )
                        else str(pathlib.Path(self.prefix).name))
 
+        tmplt_file  = self.seek_template_file(args, option='template', env_val='PY_ENCASE_TEMPLATE')
+
         keyword_buf = {}
         keyword_buf.update(self.__class__.FILENAME_DEFAULT)
         keyword_buf.update({
@@ -2440,7 +2537,7 @@ class PyEncase(object):
             '____py_shebang_pattern____': self.python_shebang,
         })
 
-        readme_path = self.update_readme(keywords=keyword_buf,
+        readme_path = self.update_readme(keywords=keyword_buf, input_file=tmplt_file, 
                                          bin_basenames=[x.removesuffix('.py') for x in bin_scr],
                                          lib_basenames=[x.removesuffix('.py') for x in lib_scr],
                                          flg_git=flg_git, backup=flg_backup,
@@ -2457,13 +2554,16 @@ class PyEncase(object):
 
         work_top = os.path.join(self.srcdir, args.module_src) if flg_module_source else self.prefix 
 
+        tmplt_file  = self.seek_template_file(args, option='template', env_val='PY_ENCASE_TEMPLATE')
+
         if (not os.path.exists(work_top)) or (not os.path.isdir(work_top)):
             self.stderr.write("ERROR: Directory not found : ", work_top)
             return 
 
         if not flg_module_source:
             self.make_gitignore_contents(os.path.join(self.prefix, '.gitignore'),
-                                         encoding=self.encoding, dry_run=flg_dry_run, verbose=flg_verbose)
+                                         input_file=tmplt_file, encoding=self.encoding,
+                                         dry_run=flg_dry_run, verbose=flg_verbose)
                 
             self.put_gitkeep(dry_run=flg_dry_run, verbose=flg_verbose)
             gitif = self.__class__.GitIF(opts=args,
@@ -2491,7 +2591,7 @@ class PyEncase(object):
 
         # text_filter = self.__class__.EmbeddedText.FormatFilter(format_variables=str_format)
         self.make_gitignore_contents(output_path=module_gitignore,
-                                     git_keepdirs=[],
+                                     input_file=tmplt_file, git_keepdirs=[],
                                      template_s_marker=r'\s*#{5,}\s*____MODULE_DOT_GITIGNORE_TEMPLATE_START____\s*#{5,}',
                                      templete_e_marker=r'\s*#{5,}\s*____MODULE_DOT_GITIGNORE_TEMPLATE_END____\s*#{5,}',
                                      dry_run=flg_dry_run, verbose=flg_verbose, format_alist=str_format)
@@ -2538,6 +2638,8 @@ class PyEncase(object):
 
         title       = args.title       if hasattr(args, 'title')       else ""
         description = args.title       if hasattr(args, 'description') else ""
+
+        tmplt_file  = self.seek_template_file(args, option='template', env_val='PY_ENCASE_TEMPLATE')
 
         clsnames     = args.class_name  if hasattr(args, 'class_name')  else []
         req_modules  = args.module      if hasattr(args, 'module')      else []
@@ -2647,7 +2749,7 @@ class PyEncase(object):
                 '____py_shebang_pattern____' : newmodule_shebang,
                 '____README_NAME____' : self.__class__.FILENAME_DEFAULT.get('____README_NAME____', 'README.md'),
                 '____TITLE____':              title,
-                '____PIP_MODULE_NAME____': self.__class__.ENTYTY_FILE_NAME,
+                '____PIP_MODULE_NAME____': self.__class__.ENTITY_FILE_NAME,
             })
 
             new_module_top = os.path.join(module_src_top, module_name)
@@ -2669,7 +2771,7 @@ class PyEncase(object):
 
                 new_module_gitignore = os.path.join(new_module_top, '.gitignore')
                 self.make_gitignore_contents(output_path=new_module_gitignore,
-                                             git_keepdirs=[],
+                                             input_file=tmplt_file, git_keepdirs=[],
                                              template_s_marker=r'\s*#{5,}\s*____MODULE_DOT_GITIGNORE_TEMPLATE_START____\s*#{5,}',
                                              templete_e_marker=r'\s*#{5,}\s*____MODULE_DOT_GITIGNORE_TEMPLATE_END____\s*#{5,}',
                                              dry_run=flg_dry_run, verbose=flg_verbose, format_alist=str_format)
@@ -2683,7 +2785,8 @@ class PyEncase(object):
                                                  template_s_marker=r'\s*#{5,}\s*____MODULE_README_MD_TEMPLATE_START____\s*#{5,}',
                                                  template_e_marker=r'\s*#{5,}\s*____MODULE_README_MD_TEMPLATE_END____\s*#{5,}',
                                                  filter_obj=text_filter, dequote=True,
-                                                 short_name='README', verbose=flg_verbose, dry_run=flg_dry_run)
+                                                 input_file=tmplt_file, short_name='README', 
+                                                 verbose=flg_verbose, dry_run=flg_dry_run)
                 
             text_path_templates = [('LICENSE',        'BSD_3_CLAUSE_LICENSE'), 
                                    ('Makefile',       'MODULE_DIR_MAKEFILE'), 
@@ -2694,7 +2797,8 @@ class PyEncase(object):
                                                  template_s_marker=r'\s*#{5,}\s*____'+markerid+r'_TEMPLATE_START____\s*#{5,}',
                                                  template_e_marker=r'\s*#{5,}\s*____'+markerid+r'_TEMPLATE_END____\s*#{5,}',
                                                  filter_obj=text_filter, dequote=True,
-                                                 short_name=fname, verbose=flg_verbose, dry_run=flg_dry_run)
+                                                 input_file=tmplt_file, short_name=fname,
+                                                 verbose=flg_verbose, dry_run=flg_dry_run)
 
             code_path_template = [('__init__.py',           'MODULE_SRC_INIT_PY'),
                                   (module_short_path+'.py' ,'MODULE_SRC_MODULE_NAME_PY')]
@@ -2705,13 +2809,15 @@ class PyEncase(object):
                                                  template_s_marker=r'\s*#{5,}\s*____'+markerid+r'_TEMPLATE_START____\s*#{5,}',
                                                  template_e_marker=r'\s*#{5,}\s*____'+markerid+r'_TEMPLATE_END____\s*#{5,}',
                                                  filter_obj=code_filter, dequote=False,
-                                                 short_name=fname, verbose=flg_verbose, dry_run=flg_dry_run)
+                                                 input_file=tmplt_file, short_name=fname,
+                                                 verbose=flg_verbose, dry_run=flg_dry_run)
 
 
     def extract_template_with_check(self, output_path,
                                     template_s_marker,
                                     template_e_marker,
                                     filter_obj, dequote,
+                                    input_file=None,
                                     short_name=None, verbose=False, dry_run=False):
         fname = short_name if short_name else os.path.basename(output_path)
         if os.path.exists(output_path):
@@ -2723,7 +2829,7 @@ class PyEncase(object):
             self.stderr.write("Preparing %s from template : '%s'" % (fname, output_path))
                 
         if not dry_run:
-            self.__class__.EmbeddedText.extract_to_file(outfile=output_path, infile=None,
+            self.__class__.EmbeddedText.extract_to_file(outfile=output_path, infile=input_file,
                                                         s_marker=template_s_marker,
                                                         e_marker=template_e_marker,
                                                         include_markers=False, multi_match=False, dedent=True, 
@@ -2732,7 +2838,7 @@ class PyEncase(object):
                                                         open_mode='w', encoding=self.encoding)
             os.chmod(output_path, mode=0o644)
 
-    def update_readme(self, keywords={}, bin_basenames=[], lib_basenames=[],
+    def update_readme(self, keywords={}, bin_basenames=[], lib_basenames=[], input_file=None,
                       flg_git=False, backup=False, verbose=False, dry_run=False):
 
         readme_path = os.path.join(self.prefix,
@@ -2752,7 +2858,7 @@ class PyEncase(object):
                 if verbose or dry_run:
                     self.stderr.write("Save Readme file : '%s'" % (readme_path, ))
                 if not dry_run:
-                    readme_updater.save_readme_contents(output=readme_path, format_alist=keywords)
+                    readme_updater.save_readme_contents(output=readme_path, input_file=input_file, format_alist=keywords)
             else:
                 buf = readme_updater.proc_file(in_file=readme_bkup, 
                                                out_file=readme_path, encoding=self.encoding,
@@ -2761,7 +2867,7 @@ class PyEncase(object):
             if verbose or dry_run:
                 self.stderr.write("Save Readme file : '%s'" % (readme_path, ))
             if not dry_run:
-                readme_updater.save_readme_contents(output=readme_path, format_alist=keywords)
+                readme_updater.save_readme_contents(output=readme_path, input_file=input_file, format_alist=keywords)
 
     @classmethod
     def to_py_identifier_capitalized(cls, s:str, use_underscore:bool=True)->str:
@@ -2788,11 +2894,11 @@ class PyEncase(object):
             chanks += "___"
         return chanks
 
-    def add_pyscr(self, basename, keywords={},
+    def add_pyscr(self, basename, input_file=None, keywords={},
                   use_framework=False, verbose=False, dry_run=False):
         if isinstance(basename, list):
             for bn in basename:
-                self.add_pyscr(bn, keywords=keywords,
+                self.add_pyscr(bn, input_file=input_file, keywords=keywords,
                                use_framework=use_framework,
                                verbose=verbose, dry_run=dry_run)
             return
@@ -2823,7 +2929,7 @@ class PyEncase(object):
                     smrkr = r'\s*#{5,}\s*____PY_MAIN_TEMPLATE_START____\s*#{5,}'
                     emrkr = r'\s*#{5,}\s*____PY_MAIN_TEMPLATE_END____\s*#{5,}'
 
-                self.__class__.EmbeddedText.extract_to_file(outfile=scr_path,infile=None,
+                self.__class__.EmbeddedText.extract_to_file(outfile=scr_path,infile=input_file,
                                                             s_marker=smrkr, e_marker=emrkr,
                                                             include_markers=False, multi_match=False, dedent=True, 
                                                             skip_head_emptyline=True, skip_tail_emptyline=True,
@@ -2839,10 +2945,10 @@ class PyEncase(object):
                                              dry_run=dry_run, verbose=verbose)
 
 
-    def add_pylib(self, basename, keywords={}, verbose=False, dry_run=False):
+    def add_pylib(self, basename, input_file=None, keywords={}, verbose=False, dry_run=False):
         if isinstance(basename, list):
             for bn in basename:
-                self.add_pylib(bn, keywords=keywords, verbose=verbose, dry_run=dry_run)
+                self.add_pylib(bn, input_file=input_file, keywords=keywords, verbose=verbose, dry_run=dry_run)
             return
 
         scr_path = os.path.join(self.python_path, basename+'.py')
@@ -2857,13 +2963,13 @@ class PyEncase(object):
             
             if not dry_run:
                 if callable(gen_fuction):
-                    gen_fuction(scr_path, keywords=keywords, shebang=self.python_shebang)
+                    gen_fuction(scr_path, input_file=input_file, keywords=keywords, shebang=self.python_shebang)
                 else:
                     str_format = {'____NEW_CLS_NAME____': basename}
                     str_format.update(keywords)
                     code_filter = self.__class__.PyCodeFilter(self.python_shebang, keyword_table=str_format)
 
-                    self.__class__.EmbeddedText.extract_to_file(outfile=scr_path, infile=None,
+                    self.__class__.EmbeddedText.extract_to_file(outfile=scr_path, infile=input_file,
                                                                 s_marker=r'\s*#{5,}\s*____PY_LIB_SCRIPT_TEMPLATE_START____\s*#{5,}',
                                                                 e_marker=r'\s*#{5,}\s*____PY_LIB_SCRIPT_TEMPLATE_END____\s*#{5,}',
                                                                 include_markers=False, multi_match=False,dedent=True, 
@@ -2872,13 +2978,14 @@ class PyEncase(object):
                                                                 open_mode='w', encoding=self.encoding)
 
     def create_kvfile(self, kvfiles,
+                      input_file=None, 
                       kivy_home=None,
                       template_s_marker=None,
                       templete_e_marker=None,
                       dry_run=False, verbose=False, format_alist={}, **format_args):
         if isinstance(kvfiles, list):
             for kv in kvfiles:
-                self.create_kvfile(kv, kivy_home=kivy_home,
+                self.create_kvfile(kv, input_file=input_file, kivy_home=kivy_home,
                                    template_s_marker=template_s_marker,
                                    templete_e_marker=templete_e_marker,
                                    dry_run=dry_run, verbose=verbose,
@@ -2912,7 +3019,7 @@ class PyEncase(object):
             tmplt_e_mrkr = templete_e_marker if template_s_marker else r'\s*#{5,}\s*____PY_MAIN_KVFILE_TEMPLATE_END____\s*#{5,}'
 
             os.makedirs(os.path.dirname(kv_path), mode=0o755, exist_ok=True)
-            self.__class__.EmbeddedText.extract_to_file(outfile=kv_path, infile=None,
+            self.__class__.EmbeddedText.extract_to_file(outfile=kv_path, infile=input_file,
                                                         s_marker=tmplt_s_mrkr,
                                                         e_marker=tmplt_e_mrkr,
                                                         include_markers=False, multi_match=False,dedent=True, 
@@ -2922,7 +3029,7 @@ class PyEncase(object):
             os.chmod(kv_path, mode=0o644)
 
 
-    def make_gitignore_contents(self, output_path,
+    def make_gitignore_contents(self, output_path, input_file=None,
                                 git_keepdirs=None,
                                 template_s_marker=None,
                                 templete_e_marker=None,
@@ -2954,7 +3061,7 @@ class PyEncase(object):
             tmplt_s_mrkr = template_s_marker if template_s_marker else r'\s*#{5,}\s*____GITIGNORE_TEMPLATE_START____\s*#{5,}'
             tmplt_e_mrkr = templete_e_marker if template_s_marker else r'\s*#{5,}\s*____GITIGNORE_TEMPLATE_END____\s*#{5,}'
 
-            self.__class__.EmbeddedText.extract_to_file(outfile=output_path, infile=None,
+            self.__class__.EmbeddedText.extract_to_file(outfile=output_path, infile=input_file,
                                                         s_marker=tmplt_s_mrkr,
                                                         e_marker=tmplt_e_mrkr,
                                                         include_markers=False, multi_match=False,dedent=True, 
@@ -3115,7 +3222,7 @@ class PyEncase(object):
                     #                                                                     os.path.basename(__file__), bn))
                     buf.append("  %-3s %-42s Symbolic link to %s to invoke %s.py.\n"
                                % ("%d." % (f,), bin_subpath+':', 
-                                  pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name, bn))
+                                  self.ref_pycan.__class__.ENTITY_FILE_NAME, bn))
 
             for bn in self.lib_basenames:
                 scr_subpath = os.path.join(self.python_subdir, bn+'.py')
@@ -3126,7 +3233,7 @@ class PyEncase(object):
 
             return buf, f
 
-        def save_readme_contents(self, output, bin_basenames=None, lib_basenames=None, gitkeepdirs=None, format_alist={}, **format_args):
+        def save_readme_contents(self, output, input_file=None, bin_basenames=None, lib_basenames=None, gitkeepdirs=None, format_alist={}, **format_args):
 
             str_format={'____GIT_DUMMYFILE____':        self.ref_pycan.__class__.FILENAME_DEFAULT['____GIT_DUMMYFILE____'],
                         '____TITLE____' :               'Project Title',
@@ -3139,7 +3246,7 @@ class PyEncase(object):
                         '____PIP_SRC____':              str(self.pip_src_subdir),
                         '____PIP_LOG____':              str(self.pip_log_subdir),
                         '____SHSCRIPT_ENTITY_NAME____':
-                        pathlib.Path(inspect.getsourcefile(inspect.currentframe())).resolve().name, # os.path.basename(__file__),
+                        self.ref_pycan.__class__.ENTITY_FILE_NAME, # os.path.basename(__file__),
                         '____AUTHOR_NAME____':          'Auther Name',
                         '____AUTHOR_EMAIL____':         'Auther-email-address',
                         '____GIT_DUMMY_LISTS____':      "\n",
@@ -3218,7 +3325,7 @@ class PyEncase(object):
 
             text_filter = self.ref_pycan.__class__.EmbeddedText.FormatFilter(format_variables=str_format)
 
-            self.ref_pycan.__class__.EmbeddedText.extract_to_file(outfile=output, infile=None,
+            self.ref_pycan.__class__.EmbeddedText.extract_to_file(outfile=output, infile=input_file,
                                                                   s_marker=r'\s*#{5,}\s*____README_TEMPLATE_START____\s*#{5,}',
                                                                   e_marker=r'\s*#{5,}\s*____README_TEMPLATE_END____\s*#{5,}',
                                                                   include_markers=False, multi_match=False,dedent=True, 
@@ -3226,6 +3333,36 @@ class PyEncase(object):
                                                                   dequote=True, format_filter=text_filter, 
                                                                   open_mode='w', encoding=self.ref_pycan.encoding)
             os.chmod(output, mode=0o644)
+
+    def dump_template_contents(self, outfile=None, infile=None, open_mode='w',
+                               header=None, footer=None, indent=0, encoding='utf-8'):
+        input_path = pathlib.Path(infile) if (isinstance(infile,str) and infile) else self.__class__.ENTITY_PATH
+
+        marker_pairs = [(r'\s*#{5,}\s*____STREAMEXTD_TEMPLATE_START____\s*#{5,}',
+                         r'\s*#{5,}\s*____STREAMEXTD_TEMPLATE_END____\s*#{5,}'),
+                        (r'\s*#{5,}\s*____GITIGNORE_TEMPLATE_START____\s*#{5,}',
+                         r'\s*#{5,}\s*____PY_ENCASE_END_OF_TEMPLATE_PART____\s*#{5,}')]
+
+        fout = sys.stdout if outfile is None else open(outfile, mode=open_mode, encoding=encoding)
+
+        if header is not None:
+            fout.write(str(header))
+            
+        for smrkr,emrkr in marker_pairs:
+            for line in self.__class__.EmbeddedText.extract_from_file(infile=infile, s_marker=smrkr, e_marker=emrkr,
+                                                                      include_markers=True,
+                                                                      multi_match=True, dedent=True, 
+                                                                      skip_head_emptyline=False,
+                                                                      skip_tail_emptyline=False,
+                                                                      dequote=False, format_filter=None, encoding=encoding):
+                fout.write('    '*indent+line)
+
+        if footer is not None:
+            fout.write(str(footer))
+
+        if outfile is not None:
+            fout.close()
+
 
     class PyCodeFilter(object):
 
@@ -3249,11 +3386,11 @@ class PyEncase(object):
                     line = line.replace(str(k), str(v))
             return line
 
-    def python_pkg_cache_template_save(self, outputfile, keywords:dict={}, shebang:str=None):
+    def python_pkg_cache_template_save(self, outputfile, input_file=None, keywords:dict={}, shebang:str=None):
 
         code_filter = self.__class__.PyCodeFilter(self.python_shebang, keyword_table=keywords)
 
-        self.__class__.EmbeddedText.extract_to_file(outfile=outputfile, infile=None,
+        self.__class__.EmbeddedText.extract_to_file(outfile=outputfile, infile=input_file,
                                                     s_marker=r'\s*#{5,}\s*____PKG_CACHE_TEMPLATE_START____\s*#{5,}',
                                                     e_marker=r'\s*#{5,}\s*____PKG_CACHE_TEMPLATE_END____\s*#{5,}',
                                                     include_markers=False, multi_match=False,dedent=True, 
@@ -3262,11 +3399,11 @@ class PyEncase(object):
                                                     open_mode='w', encoding=self.encoding)
         os.chmod(outputfile, mode=0o644)
 
-    def python_intrinsic_format_template_save(self, outputfile, keywords:dict={}, shebang:str=None):
+    def python_intrinsic_format_template_save(self, outputfile, input_file=None, keywords:dict={}, shebang:str=None):
 
         code_filter = self.__class__.PyCodeFilter(self.python_shebang, keyword_table=keywords)
 
-        self.__class__.EmbeddedText.extract_to_file(outfile=outputfile, infile=None,
+        self.__class__.EmbeddedText.extract_to_file(outfile=outputfile, infile=input_file,
                                                     s_marker=r'\s*#{5,}\s*____INTRINSIC_FORMATTER_TEMPLATE_START____\s*#{5,}',
                                                     e_marker=r'\s*#{5,}\s*____INTRINSIC_FORMATTER_TEMPLATE_END____\s*#{5,}',
                                                     include_markers=False, multi_match=False,dedent=True, 
@@ -3275,11 +3412,11 @@ class PyEncase(object):
                                                     open_mode='w', encoding=self.encoding)
         os.chmod(outputfile, mode=0o644)
 
-    def python_streamextd_template_save(self, outputfile, keywords:dict={}, shebang:str=None):
+    def python_streamextd_template_save(self, outputfile, input_file=None, keywords:dict={}, shebang:str=None):
 
         code_filter = self.__class__.PyCodeFilter(self.python_shebang, keyword_table=keywords)
 
-        self.__class__.EmbeddedText.extract_to_file(outfile=outputfile, infile=None,
+        self.__class__.EmbeddedText.extract_to_file(outfile=outputfile, infile=input_file,
                                                     s_marker=r'\s*#{5,}\s*____STREAMEXTD_TEMPLATE_START____\s*#{5,}',
                                                     e_marker=r'\s*#{5,}\s*____STREAMEXTD_TEMPLATE_END____\s*#{5,}',
                                                     include_markers=False, multi_match=True,dedent=True, 
