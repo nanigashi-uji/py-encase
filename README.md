@@ -2,7 +2,7 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/py-encase?logo=pypi)](https://pypi.org/project/py-encase/)
 [![Python Versions](https://img.shields.io/pypi/pyversions/py-encase?logo=python)](https://pypi.org/project/py-encase/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD--3--Clause-blue.svg)](LICENSE)
 [![Downloads](https://static.pepy.tech/badge/py-encase)](https://pepy.tech/project/py-encase)
 
 **py-encase** is a utility to set up a **portable Python script environment** quickly and consistently.  
