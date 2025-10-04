@@ -25,7 +25,7 @@ bdist_wheel: README.rst
 	$(PYTHON) setup.py $@
 
 test_upload: sdist bdist_wheel
-	twine upload --verbose --repository pypitest dist/*
+	twine upload --verbose --repository testpypi dist/*
 
 upload: sdist bdist_wheel
 	twine upload --verbose dist/*
