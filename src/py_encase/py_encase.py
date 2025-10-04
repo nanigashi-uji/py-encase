@@ -28,7 +28,7 @@ import pkgutil
 
 class PyEncase(object):
 
-    VERSION          = '0.0.21'
+    VERSION          = '0.0.22'
     PIP_MODULE_NAME  = 'py-encase'
     ENTITY_FILE      = pathlib.Path(inspect.getsourcefile(inspect.currentframe()))
     ENTITY_PATH      = ENTITY_FILE.resolve()
@@ -285,7 +285,7 @@ class PyEncase(object):
                                      help='Use template with application framework')
             parser_init.add_argument('-B', '--bare-script',   action='store_false', dest='app_framework',
                                      help='Use template without application framework')
-            parser_init.add_argument('-K', '--gui-kvfile', type=str, nargs='?', const=None, default='',
+            parser_init.add_argument('-K', '--gui-kvfile', type=str, nargs='?', const=None, default=None,
                                          help='Add sample KV file for GUI aplication')
 
 
