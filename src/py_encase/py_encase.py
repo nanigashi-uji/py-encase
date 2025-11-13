@@ -28,7 +28,7 @@ import pkgutil
 
 class PyEncase(object):
 
-    VERSION          = '0.0.22'
+    VERSION          = '0.0.23'
     PIP_MODULE_NAME  = 'py-encase'
     ENTITY_FILE      = pathlib.Path(inspect.getsourcefile(inspect.currentframe()))
     ENTITY_PATH      = ENTITY_FILE.resolve()
@@ -517,7 +517,7 @@ class PyEncase(object):
             if hasattr(argps, 'handler'):
                 argps.handler(argps, restps)
             else:
-                argprsrm.print_help()
+                argprsrm.print_usage()
             
     def invoke_pip(self, args:argparse.Namespace, rest:list=[]):
         flg_verbose = args.verbose if hasattr(args, 'verbose') else False
