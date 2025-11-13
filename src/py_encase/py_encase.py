@@ -28,7 +28,7 @@ import pkgutil
 
 class PyEncase(object):
 
-    VERSION          = '0.0.23'
+    VERSION          = '0.0.24'
     PIP_MODULE_NAME  = 'py-encase'
     ENTITY_FILE      = pathlib.Path(inspect.getsourcefile(inspect.currentframe()))
     ENTITY_PATH      = ENTITY_FILE.resolve()
@@ -576,7 +576,7 @@ class PyEncase(object):
                                   (self.__class__.VERSION, latest_version, str(force_install)))
                 raise ValueError("Filename is not proper: '"+orig_path.name+"' != '"+self.__class__.ENTITY_FILE_NAME+"'")
 
-            if flg_verbose or dry_run:
+            if flg_verbose or flg_dry_run:
                 self.stderr.write("selfupdate: Current version=='%s', Latest version=='%s', Force install?: %s" %
                                  (self.__class__.VERSION, latest_version, str(force_install)))
 
