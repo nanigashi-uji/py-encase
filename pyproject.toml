@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "py-encase"
-version = "0.0.24"
+version = "0.0.25"
 description = "Tool for encased python script environment."
 dependencies = []
 readme = "README.rst"
@@ -48,4 +48,4 @@ where = ["src"]
 py_encase = "py_encase.py_encase:main"
 
 [tool.setuptools.package-data]
-py_encase = ["src/share/py-encase/*.py"]
+py_encase = ["src/share/py-encase/template/*.py", "src/share/py-encase/utils/*.sh"]
