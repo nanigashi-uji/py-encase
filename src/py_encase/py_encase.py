@@ -28,7 +28,7 @@ import pkgutil
 
 class PyEncase(object):
 
-    VERSION          = '0.0.25'
+    VERSION          = '0.0.26'
     PIP_MODULE_NAME  = 'py-encase'
     ENTITY_FILE      = pathlib.Path(inspect.getsourcefile(inspect.currentframe()))
     ENTITY_PATH      = ENTITY_FILE.resolve()
@@ -1302,7 +1302,7 @@ class PyEncase(object):
                 return False
     
             mod_path = '_'.join([subdir.replace(os.sep, '_', module)]) if subdir else module
-            cmd_args = [self.gh_path, 'repo',  'create', , mod_path]
+            cmd_args = [self.gh_path, 'repo',  'create', mod_path]
             if description:
                 cmd_args.extend(['--description', description])
     

@@ -16,7 +16,7 @@ py_mod_fn="$(echo "${py_module}" | "${TR:-tr}" '-' '_')"
 # PIP=
 #
 # PY_MOD_VER: "py-encase" to be used (Default = Empty == Latest version)
-# PY_MOD_VER=0.0.25
+# PY_MOD_VER=0.0.26
 
 # WORKTOP: Top directory of user working directory
 # (Default = Empty == ${HOME}/Documents/workspace )
