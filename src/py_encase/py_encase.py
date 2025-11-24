@@ -8,6 +8,9 @@ import datetime
 import pathlib
 import argparse
 import shutil
+import platform
+import asyncio
+import threading
 import subprocess
 import inspect
 import filecmp
@@ -28,7 +31,7 @@ import pkgutil
 
 class PyEncase(object):
 
-    VERSION          = '0.0.26'
+    VERSION          = '0.0.27'
     PIP_MODULE_NAME  = 'py-encase'
     ENTITY_FILE      = pathlib.Path(inspect.getsourcefile(inspect.currentframe()))
     ENTITY_PATH      = ENTITY_FILE.resolve()
@@ -1150,9 +1153,9 @@ class PyEncase(object):
             self.dry_run  = dry_run
             self.encoding = encoding
     
-        def invoke(self, cmdargs:list, verbose:bool=None, dry_run:bool=None,
-                   check:bool=True, text:bool=True, hook=None,
-                   more_upper:bool=False, encoding=None, **args):
+        def invoke_simple(self, cmdargs:list, verbose:bool=None, dry_run:bool=None,
+                          check:bool=True, text:bool=True, hook=None,
+                          more_upper:bool=False, encoding=None, **args):
             
             f_verbose = self.verbose if verbose is None else bool(verbose)
             f_dry_run = self.dry_run if dry_run is None else bool(dry_run)
@@ -1185,6 +1188,188 @@ class PyEncase(object):
             if callable(hook):
                 hook(cmdargs, ret, **args)
             return int(ret.returncode)
+
+        def invoke(self, cmdargs:list, verbose:bool=None, dry_run:bool=None,
+                   check:bool=True, text:bool=True, hook=None,
+                   more_upper:bool=False, encoding=None, **args):
+        
+            f_verbose = self.verbose if verbose is None else bool(verbose)
+            f_dry_run = self.dry_run if dry_run is None else bool(dry_run)
+            o_encoding = encoding if encoding else self.encoding
+        
+            if isinstance(cmdargs[0], (list, tuple)):
+                buf = [self.invoke(cmdargs=list(cmdarg), verbose=f_verbose,
+                                   dry_run=f_dry_run, check=check, text=text,
+                                   hook=hook, more_upper=more_upper,
+                                   encoding=o_encoding, **args) for cmdarg in cmdargs ]
+                return tuple(buf) if isinstance(cmdargs, tuple) else buf
+        
+            if f_verbose or f_dry_run:
+                self.stderr.write("Exec : '%s'" % (' '.join(cmdargs),))
+        
+            null_txt = '' if text else b''
+            ret = subprocess.CompletedProcess(cmdargs, returncode=0,
+                                              stdout=null_txt, stderr=null_txt)
+        
+            if f_dry_run:
+                #if callable(hook):
+                #    hook(cmdargs, ret, **args)
+                return int(ret.returncode)
+        
+            try:
+                stdout_chunks = []
+                stderr_chunks = []
+        
+                interactive = sys.stdin.isatty()
+                system      = platform.system().lower()
+                use_pty  = interactive and system in ('linux', 'darwin')
+        
+                if use_pty: # use pty on Linux/maxOS and tty available.
+                    import pty
+                    master_fd, slave_fd = pty.openpty()
+        
+                    subproc = subprocess.Popen(list(cmdargs), stdin=slave_fd,
+                                               stdout=slave_fd, stderr=slave_fd, close_fds=True)
+                    os.close(slave_fd) # Unnecessary in parant process
+        
+                    def _from_child():
+                        """ Text capture from child proess to tty"""
+                        unitsize=32 # 1024
+                        try:
+                            while True:
+                                try:
+                                    data = os.read(master_fd, unitsize)
+                                except OSError:
+                                    break
+                                if not data:
+                                    break
+                                if text:
+                                    s = data.decode(o_encoding, errors='replace')
+                                    self.streams.stdout.stream.write(s)
+                                    self.streams.stdout.stream.flush()
+                                    stdout_chunks.append(s)
+                                else:
+                                    try:
+                                        self.streams.stdout.stream.buffer.write(data)
+                                    except AttributeError:
+                                        b = data.decode(o_encoding, errors='replace')
+                                        self.streams.stdout.stream.write(b)
+                                    self.streams.stdout.stream.flush()
+                                    stdout_chunks.append(data)
+                        finally:
+                            try:
+                                os.close(master_fd)
+                            except OSError:
+                                pass
+        
+                    tee_out = threading.Thread(target=_from_child, daemon=True)
+                    tee_out.start()
+        
+                    if interactive:
+                        def _to_child():
+                            """ Text flow from parent process (tty) to child process"""
+                            unitsize=1
+                            try:
+                                while True:
+                                    data = sys.stdin.buffer.read(unitsize)
+                                    if not data:
+                                        break
+                                    try:
+                                        os.write(master_fd, data)
+                                    except OSError:
+                                        break
+                            finally:
+                                pass # No post process due to deamon thread
+        
+                        tee_in = threading.Thread(target=_to_child, daemon=True)
+                        tee_in.start()
+        
+                    ret_code = subproc.wait()
+                    tee_out.join()
+                    
+                    # stdout/stderr are unified in pty
+                    ret = subprocess.CompletedProcess(cmdargs, returncode=ret_code,
+                                                      stdout=(''.join(stdout_chunks) if text
+                                                              else b''.join(stdout_chunks)),
+                                                      stderr=(null_txt))
+                else: # Platform other than Linux/macOS w/ tty : use asyncio
+
+                    async def _run_async():
+                        subproc = await asyncio.create_subprocess_exec(*cmdargs,
+                                                                       stdin=asyncio.subprocess.PIPE,
+                                                                       stdout=asyncio.subprocess.PIPE,
+                                                                       stderr=asyncio.subprocess.PIPE)
+        
+                        async def _read_stream(stream, sink, chunks):
+                            unitsize=32 #1024
+                            while True:
+                                data = await stream.read(unitsize)
+                                if not data:
+                                    break
+                                if text:
+                                    s = data.decode(o_encoding, errors='replace')
+                                    sink.write(s)
+                                    sink.flush()
+                                    chunks.append(s)
+                                else:
+                                    try:
+                                        sink.buffer.write(data)
+                                    except AttributeError:
+                                        sink.write(data.decode(o_encoding, errors='replace'))
+                                    sink.flush()
+                                    chunks.append(data)
+        
+                        async def _forward_stdin():
+                            unitsize=1
+                            # Thread looping due to blocking sys.stdin.read
+                            loop = asyncio.get_running_loop()
+                            while True:
+                                data = await loop.run_in_executor(None, sys.stdin.buffer.read, unitsize)
+                                if not data:
+                                    break
+                                subproc.stdin.write(data)
+                                try:
+                                    await subproc.stdin.drain()
+                                except BrokenPipeError:
+                                    break
+                            try:
+                                subproc.stdin.close()
+                            except Exception:
+                                pass
+        
+                        tasks = [_read_stream(subproc.stdout, self.streams.stdout.stream, stdout_chunks),
+                                 _read_stream(subproc.stderr, self.streams.stderr.stream, stderr_chunks), ]
+                        if interactive:
+                            tasks.append(_forward_stdin())
+        
+                        await asyncio.gather(*tasks)
+                        ret_code = await subproc.wait()
+        
+                        return subprocess.CompletedProcess(cmdargs,
+                                                           returncode=ret_code,
+                                                           stdout=(''.join(stdout_chunks) if text
+                                                                   else b''.join(stdout_chunks)),
+                                                           stderr=(''.join(stderr_chunks) if text
+                                                                   else b''.join(stderr_chunks)))
+        
+                    ret = asyncio.run(_run_async())
+
+                # Equivalent to subprocess.run(check=True) 
+                if check and ret.returncode != 0:
+                    raise subprocess.CalledProcessError(ret.returncode, cmdargs,
+                                                        output=ret.stdout, stderr=ret.stderr)
+                if f_verbose:
+                    self.stderr.write("Return code(%s): %d" % (cmdargs[0], ret.returncode,),
+                                      more_upper=more_upper)
+        
+            except Exception as e:
+                self.stderr.write(f"Exec ERROR ({e})", more_upper=more_upper)
+        
+            if callable(hook):
+                hook(cmdargs, ret, **args)
+        
+            return int(ret.returncode)
+
         
     class GitHubIF(StreamExtd):
         DEFAULT = {'gh_cmd':  'gh'}
@@ -3148,7 +3333,11 @@ class PyEncase(object):
 
         def update_keywords(self, text):
             for k,v in self.keywords.items():
-                text = text.replace(k, v)
+                try:
+                    text = text.replace(str(k), str(v))
+                except(e):
+                    self.ref_pycan.stderr.write("Failed to keyword replacement '%s' '%s' " % (k, type(v), ))
+                    pass
             return text
 
         def proc_file(self, in_file=None, in_text='', out_file=None, encoding="utf-8", verbose=False, dry_run=False):

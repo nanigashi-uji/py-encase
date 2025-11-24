@@ -16,7 +16,7 @@ py_mod_fn="$(echo "${py_module}" | "${TR:-tr}" '-' '_')"
 # PIP=
 #
 # PY_MOD_VER: "py-encase" to be used (Default = Empty == Latest version)
-# PY_MOD_VER=0.0.26
+# PY_MOD_VER=0.0.27
 
 # WORKTOP: Top directory of user working directory
 # (Default = Empty == ${HOME}/Documents/workspace )
@@ -153,9 +153,12 @@ repo_type_select () {
             git_remote_setup=1
             git_hosting='github'
             github_userinfo=1
-            #git_user_name="${github_account}"
-            #git_user_email="${github_user_email}"
-            #git_remote_account="${github_account}"
+            git_user_name="${github_account}"
+            git_user_email="${github_user_email}"
+            git_remote_account="${github_account}"
+            author_email="${github_user_email}"
+            maintainer_name="${github_account}"
+            maintainer_email="${github_user_email}"
             ;;
         gitlab)
             # gitlab_account='xxxxxxxxxx'
@@ -172,9 +175,12 @@ repo_type_select () {
             git_remote_setup=1
             git_hosting='gitlab'
             gitlab_userinfo=1
-            #git_user_name="${gitlab_account}"
-            #git_user_email="${gitlab_user_email}"
-            #git_remote_account="${gitlab_account}"
+            git_user_name="${gitlab_account}"
+            git_user_email="${gitlab_user_email}"
+            git_remote_account="${gitlab_account}"
+            author_email="${gitlab_user_email}"
+            maintainer_name="${gitlab_account}"
+            maintainer_email="${gitlab_user_email}"
             ;;
         *)
             repo_type='unknown'
