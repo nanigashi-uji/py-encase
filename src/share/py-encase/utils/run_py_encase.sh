@@ -16,7 +16,7 @@ py_mod_fn="$(echo "${py_module}" | "${TR:-tr}" '-' '_')"
 # PIP=
 #
 # PY_MOD_VER: "py-encase" to be used (Default = Empty == Latest version)
-# PY_MOD_VER=0.0.29
+# PY_MOD_VER=0.0.30
 
 # WORKTOP: Top directory of user working directory
 # (Default = Empty == ${HOME}/Documents/workspace )
@@ -28,7 +28,7 @@ py_mod_fn="$(echo "${py_module}" | "${TR:-tr}" '-' '_')"
 
 # PY_MOD_DEST: Destination directory of py-encase install.
 # (Default = Empty == ${DEPOT}/py-encase-${PY_MOD_VER}
-# PY_MOD_DEST = "${PY_MOD_DEST:-"${HOME}/Documents/workspace/opr/depot/py-encase-0.0.24"}"
+# PY_MOD_DEST = "${PY_MOD_DEST:-"${HOME}/Documents/workspace/opr/depot/py-encase-${PY_MOD_VER:-0.0.30}"}"
 
 repo_type_default="local"
 def_opts=''
@@ -519,25 +519,26 @@ case "${py_sbcmd}" in
         ;;
 esac
 
-if [ -z "${py_sbcmd}" -a ${s_verbose:-0} -ne 0 ] ; then
+if [ -z "${py_sbcmd}" ]; then
+    if [ ${s_verbose:-0} -ne 0 ] ; then
         echo 'No known sub-command of py_encase is specified.'
-else
+    fi
     [ $# -gt 0 ] && { py_sbcmd="$1" ; shift ; }
 fi
     
 if [ ${s_dry_run:-0} -ne 0 -o ${s_verbose:-0} -ne 0 ] ; then
     if [ "${flg_no_env:-0}" -eq 0 ]; then
         echo env PYTHONPATH="${dest_py_mod}:${PYTHONPATH}" \
-             "${py_encase_runner}" ${py_mod_mngopt} ${py_sbcmd} ${def_opts} $@
+             "${py_encase_runner}" ${py_mod_mngopt} ${py_sbcmd} ${def_opts} "$@"
     else
-        echo "${py_encase_runner}" ${py_mod_mngopt} ${py_sbcmd} ${def_opts} $@
+        echo "${py_encase_runner}" ${py_mod_mngopt} ${py_sbcmd} ${def_opts} "$@"
     fi
 fi
 if [ ${s_dry_run:-0} -eq 0  ] ; then
     if [ "${flg_no_env:-0}" -eq 0 ]; then
         env PYTHONPATH="${dest_py_mod}:${PYTHONPATH}" \
-            "${py_encase_runner}" ${py_mod_mngopt} ${py_sbcmd} ${def_opts} $@
+            "${py_encase_runner}" ${py_mod_mngopt} ${py_sbcmd} ${def_opts} "$@"
     else
-        "${py_encase_runner}" ${py_mod_mngopt} ${py_sbcmd} ${def_opts} $@
+        "${py_encase_runner}" ${py_mod_mngopt} ${py_sbcmd} ${def_opts} "$@"
     fi
 fi

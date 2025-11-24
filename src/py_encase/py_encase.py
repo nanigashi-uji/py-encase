@@ -31,7 +31,7 @@ import pkgutil
 
 class PyEncase(object):
 
-    VERSION          = '0.0.29'
+    VERSION          = '0.0.30'
     PIP_MODULE_NAME  = 'py-encase'
     ENTITY_FILE      = pathlib.Path(inspect.getsourcefile(inspect.currentframe()))
     ENTITY_PATH      = ENTITY_FILE.resolve()
@@ -246,7 +246,7 @@ class PyEncase(object):
                                         ', '.join(conf_defs)+') in '+
                                         conf_default_location + '.' )) 
             argprsrc.add_argument('-v', '--verbose', action='store_true', help='verbose output')
-            argc,rest = argprsrc.parse_known_args(rest, namespace=args) 
+            argc,restc = argprsrc.parse_known_args(rest, namespace=args) 
            
             conf_path = []
 
@@ -262,7 +262,7 @@ class PyEncase(object):
                 else:
                     raise ValueError(f'File not exists : {argc.config_file}')
 
-            config_opts = argparse.Namespace()
+            config_opts = argc # argparse.Namespace()
             flg_config_type = False
             
             for fpath in conf_path:
@@ -368,9 +368,9 @@ class PyEncase(object):
 
             argprsrm.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
             argprsrm.add_argument('-n', '--dry-run', action='store_true', help='Dry Run Mode')
-            argprsrc.add_argument('--manage-help', action='help', help='Help for manage options')
+            argprsrm.add_argument('--manage-help', action='help', help='Help for manage options')
 
-            argpre,restpre = argprsrm.parse_known_args(rest, namespace=config_opts)
+            argpre,restpre = argprsrm.parse_known_args(restc, namespace=config_opts)
             self.verbose = argpre.verbose
             self.dry_run = argpre.dry_run
 
@@ -638,10 +638,10 @@ class PyEncase(object):
                                                help=('PIP command : %s' % (c,)))
                 _prsr_add.add_argument('pip_subcommand_args', nargs='*', help='Arguments for pip subcommands')
                 _prsr_add.set_defaults(handler=self.invoke_pip)
-
+            
             #argps= argprsrm.parse_args()
 
-            argps,restps = argprsrm.parse_known_args(rest, namespace=argpre) # namespace=config_opts
+            argps,restps = argprsrm.parse_known_args(restpre, namespace=argpre) # namespace=config_opts
 
             #self.set_python_path(python_cmd=argps.python, pip_cmd=argps.pip, 
             #                     prefix_cmd=(argps.prefix if hasattr(argps, 'prefix') else None))
