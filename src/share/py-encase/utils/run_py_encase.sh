@@ -16,7 +16,7 @@ py_mod_fn="$(echo "${py_module}" | "${TR:-tr}" '-' '_')"
 # PIP=
 #
 # PY_MOD_VER: "py-encase" to be used (Default = Empty == Latest version)
-# PY_MOD_VER=0.0.30
+# PY_MOD_VER=0.0.31
 
 # WORKTOP: Top directory of user working directory
 # (Default = Empty == ${HOME}/Documents/workspace )
@@ -28,7 +28,7 @@ py_mod_fn="$(echo "${py_module}" | "${TR:-tr}" '-' '_')"
 
 # PY_MOD_DEST: Destination directory of py-encase install.
 # (Default = Empty == ${DEPOT}/py-encase-${PY_MOD_VER}
-# PY_MOD_DEST = "${PY_MOD_DEST:-"${HOME}/Documents/workspace/opr/depot/py-encase-${PY_MOD_VER:-0.0.30}"}"
+# PY_MOD_DEST = "${PY_MOD_DEST:-"${HOME}/Documents/workspace/opr/depot/py-encase-${PY_MOD_VER:-0.0.31}"}"
 
 repo_type_default="local"
 def_opts=''
@@ -270,6 +270,7 @@ case "$1" in
             exit 1
         fi
         py_sbcmd="$1"
+        shift
         break
         ;;
     *)

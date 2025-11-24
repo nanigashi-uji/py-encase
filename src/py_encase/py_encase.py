@@ -31,7 +31,7 @@ import pkgutil
 
 class PyEncase(object):
 
-    VERSION          = '0.0.30'
+    VERSION          = '0.0.31'
     PIP_MODULE_NAME  = 'py-encase'
     ENTITY_FILE      = pathlib.Path(inspect.getsourcefile(inspect.currentframe()))
     ENTITY_PATH      = ENTITY_FILE.resolve()
