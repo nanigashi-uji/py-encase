@@ -1,0 +1,119 @@
+[DEFAULT]
+title = 'Title Text'              ### (sub-cmds: init newmodule update_readme )
+# template = '/.../path'          ### (sub-cmds: init add addlib addkv newmodule update_readme init_git dump_template )
+# app_framework = false           ### (sub-cmds: init add )
+# bare_script = false             ### (sub-cmds: init add )
+# gui_kvfile = '/.../xxxx.kv'     ### (sub-cmds: init add )
+# readme = false                  ### (sub-cmds: init add addlib )
+# required_module = false         ### (sub-cmds: init add addlib )
+# script_lib = 'module-name'      ### (sub-cmds: init add )
+# std_script_lib = false          ### (sub-cmds: init add addlib )
+# setup_git = false               ### (sub-cmds: init )
+# git_set_upstream = false        ### (sub-cmds: init newmodule init_git )
+# git_remote_setup = false        ### (sub-cmds: init newmodule init_git )
+# git_user_name = 'xxxxxxx'       ### (sub-cmds: init newmodule init_git )
+# git_user_email = 'xxx@yyy.zz'   ### (sub-cmds: init newmodule init_git )
+# github_userinfo = false         ### (sub-cmds: init newmodule init_git )
+# gitlab_userinfo = false         ### (sub-cmds: init newmodule init_git )
+# git_repository_name = 'name'    ### (sub-cmds: init newmodule init_git )
+# git_hosting = 'github/gitlab'   ### (sub-cmds: init newmodule init_git )
+# git_protocol = 'ssh/https/'     ### (sub-cmds: init newmodule init_git )
+# git_remote_url = 'https://...'  ### (sub-cmds: init newmodule init_git )
+# git_remote_account = 'xxxxxx'   ### (sub-cmds: init newmodule init_git )
+# git_remote_host = 'xxx.yyy.zz'  ### (sub-cmds: init newmodule init_git )
+# git_remote_port = 22            ### (sub-cmds: init newmodule init_git )
+# git_remote_path = '~/.../.../'  ### (sub-cmds: init newmodule init_git )
+# git_remote_sshopts = '-P9022'   ### (sub-cmds: init newmodule init_git )
+# git_remote_cmd = 'git'          ### (sub-cmds: init newmodule init_git )
+# git_remote_share = '--'         ### (sub-cmds: init newmodule init_git )
+# git_remote_name = 'false|true|umask|group|all|world|everybody'
+                                  ### (sub-cmds: init newmodule init_git )
+# ssh_command = 'ssh'             ### (sub-cmds: init newmodule init_git )
+# gh_command =  'gh'              ### (sub-cmds: init newmodule init_git )
+# glab_command = 'glab'           ### (sub-cmds: init newmodule init_git )
+# move = false                    ### (sub-cmds: init )
+# python = 'python3'              ### (sub-cmds: init add addlib newmodule )
+# git_command = 'git'             ### (sub-cmds: init add addlib newmodule init_git )
+# verbose = false                 ### (sub-cmds: info contents init add addlib addkv
+#                                 ###            newmodule update_readme init_git
+#                                 ###            dump_template clean distclean selfupdate )
+# description = 'desc. of mod'    ### (sub-cmds: newmodule )
+# module_website = 'https://....' ### (sub-cmds: newmodule )
+# class_name = 'NewModuleClass'   ### (sub-cmds: newmodule )
+# keywords = 'Utility, ...'       ### (sub-cmds: newmodule )
+# classifiers = 'Development Status :: 2 - Pre-Alpha','Programming Language :: Python', ....
+                                  ### (sub-cmds: newmodule )
+# author_name = 'xxxxxxxx'        ### (sub-cmds: newmodule )
+# author_email = 'xxx@yyy.zz'     ### (sub-cmds: newmodule )
+# maintainer_name = 'xxxxxxxx'    ### (sub-cmds: newmodule )
+# maintainer_email = 'xxx@yyy.zz' ### (sub-cmds: newmodule )
+# create_year = 2025              ### (sub-cmds: newmodule )
+# no_readme = false               ### (sub-cmds: newmodule )
+# no_git_file = false             ### (sub-cmds: newmodule )
+# set_shebang = false             ### (sub-cmds: newmodule )
+# module_src = 'module_name'      ### (sub-cmds: init_git )
+# backup = false                  ### (sub-cmds: update_readme )
+# output = '/home/.../....'       ### (sub-cmds: dump_template )
+# long = false                    ### (sub-cmds: info )
+# short = false                   ### (sub-cmds: info )
+# version = false                 ### (sub-cmds: info )
+# pip_module_name = false         ### (sub-cmds: info )
+# manage_script_name = false      ### (sub-cmds: info )
+# manage_option = false           ### (sub-cmds: info )
+# all = false                     ### (sub-cmds: contents )
+# bin_script = false              ### (sub-cmds: contents )
+# lib_script = false              ### (sub-cmds: contents )
+# modules_src = false             ### (sub-cmds: contents )
+
+[local]
+#git_account = "xxxxxx"
+readme = true
+setup_git = true
+
+[selfhosted]
+# git_account = "xxxxxx"
+# git_remote_host = 'git_repo.server.xx.yy'
+readme = true
+setup_git = true
+# git_set_upstream = true
+# git_remote_setup = true
+# git_remote_host = 'git_repo.server.xx.yy'
+# git_remote_path = '/home/..../git_repositories/'
+# git_remote_port = 22
+# git_user_name = "XXXXXXXXXXXX"
+# git_user_email = "${USER}@${git_remote_host}"
+# git_protocol = 'ssh'
+# git_remote_url = 'ssh://XXXXXXXXXXXX@git_repo.server.xx.yy//home/..../git_repositories/' 
+# git_remote_account = "XXXXXXXXXXXX"
+# github_userinfo = true
+# gitlab_userinfo = true
+
+[github]
+# readme = true
+# setup_git = true
+# git_set_upstream = true
+# git_remote_setup = true
+# git_hosting = 'github'
+# github_userinfo = true
+# git_user_name = "XXXXXXXXXXXX"
+# git_user_email = "XXXXXXXXX@YYYYYYYYYY.ZZZZZZ"
+# git_remote_account = "XXXXXXXXXXXX"
+# author_name = "XXXXXXXXXXXX"
+# author_email = "XXXXXXXXX@YYYYYYYYYY.ZZZZZZ"
+# maintainer_name = "XXXXXXXXXXXX"
+# maintainer_email = "XXXXXXXXX@YYYYYYYYYY.ZZZZZZ"
+
+[gitlab]
+# readme = true
+# setup_git = true
+# git_set_upstream = true
+# git_remote_setup = true
+# git_hosting = 'gitlab'
+# gitlab_userinfo = true
+# git_user_name = "XXXXXXXXXXXX"
+# git_user_email = "XXXXXXXXX@YYYYYYYYYY.ZZZZZZ"
+# git_remote_account = "XXXXXXXXXXXX"
+# author_name = "XXXXXXXXXXXX"
+# author_email = "XXXXXXXXX@YYYYYYYYYY.ZZZZZZ"
+# maintainer_name = "XXXXXXXXXXXX"
+# maintainer_email = "XXXXXXXXX@YYYYYYYYYY.ZZZZZZ"

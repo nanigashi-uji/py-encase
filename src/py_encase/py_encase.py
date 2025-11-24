@@ -31,7 +31,7 @@ import pkgutil
 
 class PyEncase(object):
 
-    VERSION          = '0.0.27'
+    VERSION          = '0.0.28'
     PIP_MODULE_NAME  = 'py-encase'
     ENTITY_FILE      = pathlib.Path(inspect.getsourcefile(inspect.currentframe()))
     ENTITY_PATH      = ENTITY_FILE.resolve()
@@ -193,8 +193,8 @@ class PyEncase(object):
     def main(self):
         argprsr = argparse.ArgumentParser(add_help=False)
         if self.flg_symlink:
-            argprsr.set_defaults(manage=(self.path_invoked.name
-                                         in (self.MNG_SCRIPT, self.MNG_SCRIPT+'.py')))
+            flg_manage = self.path_invoked.name in (self.MNG_SCRIPT, self.MNG_SCRIPT+'.py')
+            argprsr.set_defaults(manage=flg_manage)
         else:
             argprsr.add_argument(self.MNG_OPT, action='store_true') 
 
@@ -218,13 +218,141 @@ class PyEncase(object):
                 prog = os.path.basename(self.path_invoked.name)
             else:
                 prog = ' '.join([os.path.basename(self.path_invoked.name), self.MNG_OPT])
-                
+
             class CustomHelpFormatter(argparse.HelpFormatter):
                 def __init__(self, prog, indent_increment=4,
-                             max_help_position=(shutil.get_terminal_size()[0]/2),
+                             max_help_position=int(shutil.get_terminal_size()[0]/3),
                              width=shutil.get_terminal_size()[0]):
                     super().__init__(prog, indent_increment, max_help_position, width)
 
+            argprsrc = argparse.ArgumentParser(prog=prog, formatter_class=CustomHelpFormatter,
+                                               add_help=False, exit_on_error=False)
+            conf_default_location = os.path.join(os.getenv('XDG_CONFIG_HOME',
+                                                           default=os.path.expanduser('~/.config')),
+                                                 self.__class__.PIP_MODULE_NAME)
+            if sys.version_info < (3, 11):
+                conf_formats = ['json', 'ini']
+            else:
+                conf_formats = ['toml', 'json', 'ini']
+
+            conf_def_bn = self.__class__.PIP_MODULE_NAME+'_config'
+            conf_defs   = [ conf_def_bn+'.'+ext for ext in conf_formats ]
+            
+            argprsrc.add_argument('--config-help', action='help', help='Help for configuratin file')
+            argprsrc.add_argument('-t', '--config-type', help='config type to be selected)')
+            argprsrc.add_argument('-c', '--config-file', help='additional config file')
+            argprsrc.add_argument('-f', '--norc',  action='store_true',
+                                  help=('Do not read default config file ('+
+                                        ', '.join(conf_defs)+') in '+
+                                        conf_default_location + '.' )) 
+            argprsrc.add_argument('-v', '--verbose', action='store_true', help='verbose output')
+            argc,rest = argprsrc.parse_known_args(rest, namespace=args) 
+           
+            conf_path = []
+
+            for x in conf_defs:
+                p = os.path.join(conf_default_location, x)
+                if os.path.isfile(p):
+                    conf_path.append(p)
+                    break
+
+            if isinstance(argc.config_file, str) and argc.config_file:
+                if os.path.isfile(argc.config_file):
+                    conf_path.append(argc.config_file)
+                else:
+                    raise ValueError(f'File not exists : {argc.config_file}')
+
+            config_opts = argparse.Namespace()
+            flg_config_type = False
+            
+            for fpath in conf_path:
+                fmt_type=os.path.splitext(fpath)[1][1:]
+                
+                if argc.verbose:
+                    self.stderr.write("Manage mode: Read configutation file : %s" % (fpath))
+                
+                if fmt_type == 'toml':
+                    if sys.version_info < (3, 11):
+                        raise ValueError(f'TOML is not supported in this python version ({sys.version_info}) : {fpath}')
+                    else:
+                        import tomllib
+                        with open(fpath, "rb") as fp:
+                            data = tomllib.load(fp)
+                            if argc.verbose:
+                                self.stderr.write("Load DEFAULT parameters from : %s" % (fpath))
+                            for k,v in data.get('DEFAULT',{}).items():
+                                if (not k.isidentifier() ) or keyword.iskeyword(k):
+                                    continue
+                                v_key = str(k).removeprefix('--').removeprefix('-').replace('-', '_')
+                                config_opts.__dict__[v_key] = v
+
+
+                            if isinstance(argc.config_type,str) and argc.config_type:
+                                if data.get(argc.config_type) is not None:
+                                    if argc.verbose:
+                                        self.stderr.write("Load parameters for config type == %s from : %s" % (argc.config_type, fpath))
+                                    flg_config_type = True
+                                    for k,v in data.get(argc.config_type,{}).items():
+                                        if (not k.isidentifier() ) or keyword.iskeyword(k):
+                                            continue
+                                        v_key = str(k).removeprefix('--').removeprefix('-').replace('-', '_')
+                                        config_opts.__dict__[v_key] = v
+                elif fmt_type == 'ini':
+                    import configparser
+                    cnfgpsr = configparser.ConfigParser()
+                    cnfgpsr.read(fpath, encoding=self.encoding)
+                    if argc.verbose:
+                        self.stderr.write("Load DEFAULT parameters from : %s" % (fpath))
+                    for k,v in cnfgpsr.defaults().items():
+                        if (not k.isidentifier() ) or keyword.iskeyword(k):
+                            continue
+                        v_key = str(k).removeprefix('--').removeprefix('-').replace('-', '_')
+                        config_opts.__dict__[v_key] = ( True if v.lower()=='true' else  ( False if v.lower()=='false' else v ) )
+                    if isinstance(argc.config_type,str) and argc.config_type:
+                        if argc.config_type in cnfgpsr.sections():
+                            if argc.verbose:
+                                self.stderr.write("Load parameters for config type == %s from : %s" % (argc.config_type, fpath))
+                            flg_config_type = True
+                            for k, v in cnfgpsr[argc.config_type].items():
+                                if (not k.isidentifier() ) or keyword.iskeyword(k):
+                                    continue
+                                v_key = str(k).removeprefix('--').removeprefix('-').replace('-', '_')
+                                config_opts.__dict__[v_key] = ( True if v.lower()=='true' else  ( False if v.lower()=='false' else v ) )
+
+                #elif fmt_type == 'json':
+                else: # Assume JSON as defult
+                    import json
+                    with open(fpath, "rb") as fp:
+                        data = json.load(fp)
+                        if argc.verbose:
+                            self.stderr.write("Load DEFAULT parameters from : %s" % (fpath))
+                        for k,v in data.get('DEFAULT',{}).items():
+                            if (not k.isidentifier() ) or keyword.iskeyword(k):
+                                continue
+                            v_key = str(k).removeprefix('--').removeprefix('-').replace('-', '_')
+                            config_opts.__dict__[v_key] = v
+
+                        if isinstance(argc.config_type,str) and argc.config_type:
+                            if data.get(argc.config_type) is not None:
+                                if argc.verbose:
+                                    self.stderr.write("Load parameters for config type == %s from : %s" % (argc.config_type, fpath))
+                                flg_config_type = True
+                                for k,v in data.get(argc.config_type,{}).items():
+                                    if (not k.isidentifier() ) or keyword.iskeyword(k):
+                                        continue
+                                    v_key = str(k).removeprefix('--').removeprefix('-').replace('-', '_')
+                                    config_opts.__dict__[v_key] = v
+                    
+            if (isinstance(argc.config_type,str)
+                and argc.config_type and ( not flg_config_type) ):
+                self.stderr.write('No contenst for configulation type (%s) is found' % (argc.config_type) )
+                return
+            
+            if argc.verbose:
+                self.stderr.write("Load config parameters for config file == %d " % (len(config_opts.__dict__), ))
+                for k, v in config_opts.__dict__.items():
+                    self.stderr.write("Loaded config parameter: %-25s : %s" % (str(k), str(v)))
+                
             argprsrm = argparse.ArgumentParser(prog=prog, formatter_class=CustomHelpFormatter,
                                                add_help=False, exit_on_error=False)
 
@@ -240,8 +368,9 @@ class PyEncase(object):
 
             argprsrm.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
             argprsrm.add_argument('-n', '--dry-run', action='store_true', help='Dry Run Mode')
+            argprsrc.add_argument('--manage-help', action='help', help='Help for manage options')
 
-            argpre,restpre = argprsrm.parse_known_args(rest) 
+            argpre,restpre = argprsrm.parse_known_args(rest, namespace=config_opts)
             self.verbose = argpre.verbose
             self.dry_run = argpre.dry_run
 
@@ -512,7 +641,7 @@ class PyEncase(object):
 
             #argps= argprsrm.parse_args()
 
-            argps,restps = argprsrm.parse_known_args(rest) 
+            argps,restps = argprsrm.parse_known_args(rest, namespace=argpre) # namespace=config_opts
 
             #self.set_python_path(python_cmd=argps.python, pip_cmd=argps.pip, 
             #                     prefix_cmd=(argps.prefix if hasattr(argps, 'prefix') else None))
@@ -612,7 +741,7 @@ class PyEncase(object):
 
     def run_pip(self, subcmd:str, args=[], verbose=False, dry_run=False, **popen_kwargs):
         
-        argprsrx = argparse.ArgumentParser(add_help=False, exit_on_error=False)
+        argprsrx = argparse.ArgumentParser(add_help=False, formatter_class=CustomHelpFormatter, exit_on_error=False)
         argprsrx.add_argument('--isolated',  action='store_true')
         argprsrx.add_argument('--python',    default=str(self.python_use.absolute()))
         argprsrx.add_argument('--cache-dir', default=self.python_pip_cache)
