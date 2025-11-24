@@ -31,7 +31,7 @@ import pkgutil
 
 class PyEncase(object):
 
-    VERSION          = '0.0.28'
+    VERSION          = '0.0.29'
     PIP_MODULE_NAME  = 'py-encase'
     ENTITY_FILE      = pathlib.Path(inspect.getsourcefile(inspect.currentframe()))
     ENTITY_PATH      = ENTITY_FILE.resolve()
@@ -239,9 +239,9 @@ class PyEncase(object):
             conf_defs   = [ conf_def_bn+'.'+ext for ext in conf_formats ]
             
             argprsrc.add_argument('--config-help', action='help', help='Help for configuratin file')
-            argprsrc.add_argument('-t', '--config-type', help='config type to be selected)')
-            argprsrc.add_argument('-c', '--config-file', help='additional config file')
-            argprsrc.add_argument('-f', '--norc',  action='store_true',
+            argprsrc.add_argument('--config-type', help='config type to be selected)')
+            argprsrc.add_argument('--config-file', help='additional config file')
+            argprsrc.add_argument('--no-config-read',  action='store_true',
                                   help=('Do not read default config file ('+
                                         ', '.join(conf_defs)+') in '+
                                         conf_default_location + '.' )) 
