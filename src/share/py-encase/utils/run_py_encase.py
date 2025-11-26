@@ -27,10 +27,10 @@ PYTHON: Optional[str] = None
 PIP: Optional[str] = None
 
 # PY_MOD_VER: "py-encase" version to be used.
-#   - Set a string to pin a specific version (e.g. "0.0.31")
+#   - Set a string to pin a specific version (e.g. "0.0.32")
 #   - None / "" -> detect latest version via `pip index versions py-encase`
 # PY_MOD_VER: 使用する py-encase のバージョン
-#   - 文字列を設定するとそのバージョンを固定使用（例: "0.0.31"）
+#   - 文字列を設定するとそのバージョンを固定使用（例: "0.0.32"）
 #   - None / "" -> `pip index versions py-encase` で最新版を自動検出
 PY_MOD_VER: Optional[str] = None
 
@@ -666,8 +666,8 @@ class RunPyEncase:
                         first_line = line.strip()
                         break
 
-                # Typical format: "py-encase (0.0.31)"
-                # 典型フォーマット: "py-encase (0.0.31)"
+                # Typical format: "py-encase (0.0.32)"
+                # 典型フォーマット: "py-encase (0.0.32)"
                 m = re.match(r"^[^\s]+\s*\(([\d\.]+)\)", first_line)
                 if m:
                     self.py_mod_version = m.group(1)

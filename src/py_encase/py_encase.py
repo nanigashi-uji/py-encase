@@ -190,6 +190,12 @@ class PyEncase(object):
     def set_git_path(self, git_cmd:str=None):
         self.git_path = shutil.which(git_cmd if isinstance(git_cmd,str) and git_cmd else os.environ.get('GIT', 'git'))
 
+    class CustomHelpFormatter(argparse.HelpFormatter):
+            def __init__(self, prog, indent_increment=4,
+                         max_help_position=int(shutil.get_terminal_size()[0]/3),
+                         width=shutil.get_terminal_size()[0]):
+                super().__init__(prog, indent_increment, max_help_position, width)
+
     def main(self):
         argprsr = argparse.ArgumentParser(add_help=False)
         if self.flg_symlink:
@@ -219,13 +225,7 @@ class PyEncase(object):
             else:
                 prog = ' '.join([os.path.basename(self.path_invoked.name), self.MNG_OPT])
 
-            class CustomHelpFormatter(argparse.HelpFormatter):
-                def __init__(self, prog, indent_increment=4,
-                             max_help_position=int(shutil.get_terminal_size()[0]/3),
-                             width=shutil.get_terminal_size()[0]):
-                    super().__init__(prog, indent_increment, max_help_position, width)
-
-            argprsrc = argparse.ArgumentParser(prog=prog, formatter_class=CustomHelpFormatter,
+            argprsrc = argparse.ArgumentParser(prog=prog, formatter_class=self.__class__.CustomHelpFormatter,
                                                add_help=False, exit_on_error=False)
             conf_default_location = os.path.join(os.getenv('XDG_CONFIG_HOME',
                                                            default=os.path.expanduser('~/.config')),
@@ -353,7 +353,7 @@ class PyEncase(object):
                 for k, v in config_opts.__dict__.items():
                     self.stderr.write("Loaded config parameter: %-25s : %s" % (str(k), str(v)))
                 
-            argprsrm = argparse.ArgumentParser(prog=prog, formatter_class=CustomHelpFormatter,
+            argprsrm = argparse.ArgumentParser(prog=prog, formatter_class=self.__class__.CustomHelpFormatter,
                                                add_help=False, exit_on_error=False)
 
             argprsrm.add_argument('-p', '--prefix',  default=None, help=('prefix of the directory tree. ' +
@@ -741,7 +741,7 @@ class PyEncase(object):
 
     def run_pip(self, subcmd:str, args=[], verbose=False, dry_run=False, **popen_kwargs):
         
-        argprsrx = argparse.ArgumentParser(add_help=False, formatter_class=CustomHelpFormatter, exit_on_error=False)
+        argprsrx = argparse.ArgumentParser(add_help=False, formatter_class=self.__class__.CustomHelpFormatter, exit_on_error=False)
         argprsrx.add_argument('--isolated',  action='store_true')
         argprsrx.add_argument('--python',    default=str(self.python_use.absolute()))
         argprsrx.add_argument('--cache-dir', default=self.python_pip_cache)
