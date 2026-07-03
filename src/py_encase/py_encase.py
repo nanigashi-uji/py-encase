@@ -25,13 +25,17 @@ import collections
 import urllib.parse
 import json
 import glob
+import ast
 import importlib.metadata
+import importlib.util
 import keyword
 import pkgutil
 
+__version__ = '0.0.33'
+
 class PyEncase(object):
 
-    VERSION          = '0.0.31'
+    VERSION          = __version__
     PIP_MODULE_NAME  = 'py-encase'
     ENTITY_FILE      = pathlib.Path(inspect.getsourcefile(inspect.currentframe()))
     ENTITY_PATH      = ENTITY_FILE.resolve()
@@ -82,6 +86,68 @@ class PyEncase(object):
     SCRLIB_USED_MAIN_FRMWK_TEMPLATE = ['streamextd']
 
     SCRLIB_USED_LIB_SCRIPT_TEMPLATE = []
+
+
+    KNOWN_IMPORT_NAME_TO_MODULE_NAME = { "cv2":                "opencv-python",
+                                         "PIL":                "Pillow",
+                                         "sklearn":            "scikit-learn",
+                                         "skimage":            "scikit-image",
+                                         "yaml":               "PyYAML",
+                                         "bs4":                "beautifulsoup4",
+                                         "lxml":               "lxml",
+                                         "Crypto":             "pycryptodome",
+                                         "Cryptodome":         "pycryptodomex",
+                                         "requests_oauthlib":  "requests-oauthlib",
+                                         "jwt":                "PyJWT",
+                                         "OpenSSL":            "pyOpenSSL",
+                                         "dateutil":           "python-dateutil",
+                                         "dotenv":             "python-dotenv",
+                                         "docx":               "python-docx",
+                                         "pptx":               "python-pptx",
+                                         "pptx_tools":         "python-pptx",
+                                         "magic":              "python-magic",
+                                         "usb":                "pyusb",
+                                         "serial":             "pyserial",
+                                         "win32api":           "pywin32",
+                                         "win32com":           "pywin32",
+                                         "pywintypes":         "pywin32",
+                                         "wx":                 "wxPython",
+                                         "gi":                 "PyGObject",
+                                         "MySQLdb":            "mysqlclient",
+                                         "psycopg2":           "psycopg2-binary",
+                                         "tensorflow":         "tensorflow",
+                                         "google.protobuf":    "protobuf",
+                                         "google.cloud":       "google-cloud",
+                                         "fitz":               "PyMuPDF",
+                                         "dns":                "dnspython",
+                                         "attr":               "attrs",
+                                         "flask_sqlalchemy":   "Flask-SQLAlchemy",
+                                         "flask_cors":         "Flask-Cors",
+                                         "jinja2":             "Jinja2",
+                                         "markdown":           "Markdown",
+                                         "telebot":            "pyTelegramBotAPI",
+                                         "discord":            "discord.py",
+                                         "slugify":            "python-slugify",
+                                         "Xlib":               "python-xlib",
+                                         "zmq":                "pyzmq",
+                                         "nacl":               "PyNaCl",
+                                         "editdistance":       "editdistance",
+                                         "IPython":            "ipython",
+                                         "markdown_it":        "markdown-it-py",
+                                         "typing_extensions":  "typing-extensions",
+                                         "gi":                 "PyGObject",
+                                         "OpenGL":             "PyOpenGL",
+                                         "ldap":               "python-ldap",
+                                         "pkg_resources":      "setuptools",
+                                         "setuptools":         "setuptools",
+                                         "pytest":             "pytest",
+                                         "tomlkit":            "tomlkit",
+                                         "tomli":              "tomli",
+                                         "requests":           "requests",
+                                         "numpy":              "numpy",
+                                         "pandas":             "pandas",
+                                         "matplotlib":         "matplotlib",
+                                         "Levenshtein":        "Levenshtein", }
 
     def __init__(self, argv:list=sys.argv, 
                  python_cmd:str=None, pip_cmd:str=None, 
@@ -638,14 +704,32 @@ class PyEncase(object):
                                                help=('PIP command : %s' % (c,)))
                 _prsr_add.add_argument('pip_subcommand_args', nargs='*', help='Arguments for pip subcommands')
                 _prsr_add.set_defaults(handler=self.invoke_pip)
-            
+
+            #
+            parser_showdeps = sbprsrs.add_parser('show_deps', help='Show dependency')
+            parser_showdeps.add_argument('-v', '--verbose',     action='store_true', default=self.verbose, help='Show verbose information')
+            parser_showdeps.add_argument('-a', '--all',         action='store_true', help='Show all list')
+            parser_showdeps.add_argument('-b', '--bin-script',  action='store_true', help='Show bin scripts')
+            parser_showdeps.add_argument('-l', '--lib-script',  action='store_true', help='Show lib scripts')
+            parser_showdeps.add_argument('-m', '--modules-src', action='store_true', help='Show module sources')
+            parser_showdeps.add_argument('-D', '--dump',        action='store_true', default=True, help='Show to stdout')
+            parser_showdeps.set_defaults(handler=self.show_dependency)
+
+            parser_installdeps = sbprsrs.add_parser('install_deps', help='Try install dependency')
+            parser_installdeps.add_argument('-v', '--verbose',     action='store_true', default=self.verbose, help='Show verbose information')
+            parser_installdeps.add_argument('-n', '--dry-run',     action='store_true', default=self.dry_run, help='Dry run mode')
+            parser_installdeps.add_argument('-a', '--all',         action='store_true', help='Show all list')
+            parser_installdeps.add_argument('-b', '--bin-script',  action='store_true', help='Show bin scripts')
+            parser_installdeps.add_argument('-l', '--lib-script',  action='store_true', help='Show lib scripts')
+            parser_installdeps.add_argument('-m', '--modules-src', action='store_true', help='Show module sources')
+            parser_installdeps.add_argument('-D', '--dump',        action='store_false', default=False, help='Show to stdout')
+            parser_installdeps.add_argument('pip_subcommand_args', nargs='*', help='Arguments for pip subcommands')
+            parser_installdeps.set_defaults(handler=self.install_dependency)
+
             #argps= argprsrm.parse_args()
-
             argps,restps = argprsrm.parse_known_args(restpre, namespace=argpre) # namespace=config_opts
-
             #self.set_python_path(python_cmd=argps.python, pip_cmd=argps.pip, 
             #                     prefix_cmd=(argps.prefix if hasattr(argps, 'prefix') else None))
-            
             if hasattr(argps, 'handler'):
                 argps.handler(argps, restps)
             else:
@@ -906,6 +990,9 @@ class PyEncase(object):
         flg_mod     = args.module_src    if hasattr(args, 'module_src')    else False
         flg_pip     = args.pip_installed if hasattr(args, 'pip_installed') else False
         
+        if not ( flg_bin or flg_lib or flg_mod or flg_pip) :
+            flg_all = True
+
         if flg_bin or flg_lib or flg_all:
             bin_scr, lib_scr = self.list_categorized_pkg_scripts()
             if flg_bin or flg_all:
@@ -926,8 +1013,8 @@ class PyEncase(object):
                 print(src)
         if flg_pip or flg_all:
             pip_mod = self.list_pip_modules()
-            l_name    = max([len(n) for n,v,p in pip_mod])
-            l_version = max([len(v) for n,v,p in pip_mod])
+            l_name    = max([len(n) for n,v,p in pip_mod]) if pip_mod else 0
+            l_version = max([len(v) for n,v,p in pip_mod]) if pip_mod else 0
             if flg_verbose:
                 print('Module installed: ----------------------------------------')
             for name, version, path in pip_mod:
@@ -978,6 +1065,130 @@ class PyEncase(object):
 
     def all_dir_list(self):
         return self.pkg_dir_list() + self.pip_dir_list()
+
+    def show_dependency(self, args:argparse.Namespace, rest:list=[]):
+        flg_verbose = args.verbose       if hasattr(args, 'verbose')       else self.verbose
+        flg_all     = args.all           if hasattr(args, 'all')           else False
+        flg_bin     = args.bin_script    if hasattr(args, 'bin_script')    else False
+        flg_lib     = args.lib_script    if hasattr(args, 'lib_script')    else False
+        flg_mod     = args.module_src    if hasattr(args, 'module_src')    else False
+        flg_dump    = args.dump          if hasattr(args, 'dump')          else True
+        
+        if not ( flg_bin or flg_lib or flg_mod ) :
+            flg_all = True
+
+        bin_scr, lib_scr = self.list_categorized_pkg_scripts()
+        mod_src = self.list_module_source()
+        localimport = [ x.removesuffix(".py") for x in bin_scr ]
+        localimport.extend( [ x.removesuffix(".py") for x in lib_scr ] )
+        localimport.extend( [ os.path.split(x)[-1]  for x in mod_src ] )
+        _buf = dict()
+        
+        if flg_bin or flg_lib or flg_all:
+            if flg_bin or flg_all:
+                for scr in bin_scr:
+                    if flg_verbose:
+                        self.stderr.write(("Checking import from script : %s" % (scr, )))
+                    import_list = self.collect_import_from_path(pathlib.Path(os.path.join(self.python_path, scr)))
+                    for imprtd in [ x for x in import_list if ( not self.is_stdlib_module(x.split(".")[0]) and not x.split(".")[0] in localimport ) ]:
+                        if imprtd not in _buf.keys():
+                            _buf.update({imprtd:[]})
+                        _buf[imprtd].append(scr)
+            if flg_lib or flg_all:
+                for scr in lib_scr:
+                    if flg_verbose:
+                        self.stderr.write(("Checking import from library : %s" % (scr, )))
+                    import_list = self.collect_import_from_path(pathlib.Path(os.path.join(self.python_path, scr)))
+                    for imprtd in [ x for x in import_list if ( not self.is_stdlib_module(x.split(".")[0]) and not x.split(".")[0] in localimport ) ]:
+                        if imprtd not in _buf.keys():
+                            _buf.update({imprtd:[]})
+                        _buf[imprtd].append(scr)
+        if flg_mod or flg_all:
+            for src in mod_src:
+                if flg_verbose:
+                    self.stderr.write(("Checking import from module : %s" % (src, )))
+                mod_src_dir = pathlib.Path(os.path.join(src, 'src'))
+                pyfiles = [ x for x in mod_src_dir.rglob("*.py") if "__pycache__" not in x.parts ]
+                for pyfile in pyfiles:
+                    if flg_verbose:
+                        self.stderr.write(("Checking import from file : %s" % (pyfile, )))
+                    import_list = self.collect_import_from_path(pathlib.Path(pyfile))
+                    for imprtd in [ x for x in import_list if ( not self.is_stdlib_module(x.split(".")[0]) and not x.split(".")[0] in localimport ) ]:
+                        if imprtd not in _buf.keys():
+                            _buf.update({imprtd:[]})
+                        _buf[imprtd].append(src)
+
+        if flg_verbose:
+            for dep,src in _buf.items():
+                self.stderr.write(("%-9s %s" % (str(dep)+" --> "+self.import_name_to_pip_bame(str(dep))+" :", ', '.join(src))))
+
+        req_mod_list = [ self.import_name_to_pip_bame(x) for x in _buf.keys() ]
+        if flg_dump:
+            print(" ".join(req_mod_list))
+        
+        return req_mod_list
+
+    def install_dependency(self, args:argparse.Namespace, rest:list=[]):
+        flg_verbose = args.verbose       if hasattr(args, 'verbose')       else self.verbose
+        flg_dry_run = args.dry_run       if hasattr(args, 'dry_run')       else self.dry_run
+        flg_all     = args.all           if hasattr(args, 'all')           else False
+        flg_bin     = args.bin_script    if hasattr(args, 'bin_script')    else False
+        flg_lib     = args.lib_script    if hasattr(args, 'lib_script')    else False
+        flg_mod     = args.module_src    if hasattr(args, 'module_src')    else False
+        flg_dump    = args.dump          if hasattr(args, 'dump')          else True
+        req_mod_list = self.show_dependency(args=args, rest=rest)
+        if flg_verbose:
+            self.stderr.write("Try pip install : %s" % (', '.join(req_mod_list), ))
+
+        return self.run_pip(subcmd='install',
+                            args=args.pip_subcommand_args+rest+req_mod_list,
+                            verbose=flg_verbose, dry_run=flg_dry_run)
+        
+                
+    def is_stdlib_module(self, import_arg):
+        import_name_top = import_arg.split(".")[0]
+        if import_name_top in sys.builtin_module_names:
+            return True
+    
+        if hasattr(sys, "stdlib_module_names"):
+            return ( import_name_top in sys.stdlib_module_names )
+        
+        import_spec = importlib.util.find_spec(import_name_top)
+        if import_spec is None or import_spec.origin is None:
+            return False
+    
+        import_spec_orig = import_spec.origin
+        if ( "site-packages" in import_spec_orig 
+             or "dist-packages" in import_spec_orig ):
+            return False
+
+        return True
+    
+    def collect_import_from_path(self, pathobj, encoding="utf-8"):
+        imported_modules = set()
+        try:
+            cntxt_tree = ast.parse(pathobj.read_text(encoding=encoding), filename=str(pathobj))
+        except SyntaxError:
+            return []
+        for cntxt_nd in ast.walk(cntxt_tree):
+            if isinstance(cntxt_nd, ast.Import):
+                for nd_alias in cntxt_nd.names:
+                    imported_modules.add(nd_alias.name)
+            elif isinstance(cntxt_nd, ast.ImportFrom):
+                if cntxt_nd.level == 0 and cntxt_nd.module:
+                    imported_modules.add(cntxt_nd.module)
+        return list(imported_modules)
+
+    def import_name_to_pip_bame(self, import_name):
+        names=import_name.split(".")
+        for n in [".".join(names[:i]) for i in range(len(names), 0, -1)]:
+            if n in self.__class__.KNOWN_IMPORT_NAME_TO_MODULE_NAME:
+                return self.__class__.KNOWN_IMPORT_NAME_TO_MODULE_NAME[n]
+
+        if "_" in names[0]:
+            self.stderr.write("Warning: import name %s : underscore is replaced %s" % (names[0], names[0].replace("_", "-")))
+        
+        return names[0].replace("_", "-")
 
     def make_directory_structure(self, dry_run=False, verbose=False):
         # Make directory structure 

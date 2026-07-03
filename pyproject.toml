@@ -4,7 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "py-encase"
-version = "0.0.32"
+dynamic = ["version"]
+
 description = "Tool for encased python script environment."
 dependencies = []
 readme = "README.rst"
@@ -29,6 +30,7 @@ classifiers = [
   'Programming Language :: Python :: 3.11',
   'Programming Language :: Python :: 3.12',
   'Programming Language :: Python :: 3.13',
+  'Programming Language :: Python :: 3.14',
   'Topic :: Software Development',
   'Topic :: Utilities',
 ]
@@ -51,3 +53,7 @@ py_encase = "py_encase.py_encase:main"
 py_encase = ["src/share/py-encase/template/*.py",
           "src/share/py-encase/utils/*.sh", "src/share/py-encase/utils/*.py",
           "src/share/py-encase/config/*.toml", "src/share/py-encase/config/*.json", "src/share/py-encase/config/*.ini"]
+
+[tool.setuptools.dynamic]
+version = {attr = "py_encase.py_encase.__version__"}
+
