@@ -24,6 +24,9 @@ import socket
 import collections
 import urllib.parse
 import json
+if sys.version_info >= (3, 11):
+    import tomllib
+import configparser
 import glob
 import ast
 import importlib.metadata
@@ -31,7 +34,7 @@ import importlib.util
 import keyword
 import pkgutil
 
-__version__ = '0.0.33'
+__version__ = '0.0.34'
 
 class PyEncase(object):
 
@@ -62,12 +65,15 @@ class PyEncase(object):
 
     SCRIPT_STD_LIB = {}
 
-    FILENAME_DEFAULT = { '____GIT_DUMMYFILE____': '.gitkeep',
-                         '____README_NAME____':   'README.md',
-                        }
+    FILENAME_DEFAULT = { '____GIT_DUMMYFILE____':      '.gitkeep',
+                         '____README_NAME____':        'README.md',
+                         '____MODULE_TABLE_BASE____':  'MODULE_NAME',
+                         '____MODULE_REQUIRED_BASE__': 'Requirements', }
 
-    NON_ASCII_PATTERN       = re.compile('[^0-9A-Za-z]+')
-
+    NON_ASCII_PATTERN       = re.compile(r'[^0-9A-Za-z]+')
+    NON_PYIDF_PATTERN       = re.compile(r'[^0-9A-Za-z_.]')
+    SPACENL_PATTERN         = re.compile(r'\s+', re.M)
+    
     SHEBANG_DEFAULT = '#!/usr/bin/env python3'
 
     GIT_REMOTE_DEFAULT = { 'LOCATION'      : os.path.join('~', 'git_repositories'),
@@ -86,7 +92,6 @@ class PyEncase(object):
     SCRLIB_USED_MAIN_FRMWK_TEMPLATE = ['streamextd']
 
     SCRLIB_USED_LIB_SCRIPT_TEMPLATE = []
-
 
     KNOWN_IMPORT_NAME_TO_MODULE_NAME = { "cv2":                "opencv-python",
                                          "PIL":                "Pillow",
@@ -155,8 +160,8 @@ class PyEncase(object):
                  verbose:bool=False, dry_run:bool=False, encoding='utf-8'):
 
         self.streams = self.__class__.StreamExtd(stdin=sys.stdin,
-                                                 stderr=sys.stdout,
-                                                 stdout=sys.stderr)
+                                                 stdout=sys.stdout,
+                                                 stderr=sys.stderr)
 
         self.argv         = argv
         self.path_invoked = pathlib.Path(self.argv[0])
@@ -262,6 +267,15 @@ class PyEncase(object):
                          width=shutil.get_terminal_size()[0]):
                 super().__init__(prog, indent_increment, max_help_position, width)
 
+    @classmethod
+    def argparse_path_chk(cls, path_str: str) -> pathlib.Path:
+        pathobj = pathlib.Path(path_str)
+        if not pathobj.exists():
+            raise argparse.ArgumentTypeError(f"Error: File not found : '{path_str}'")
+        if ( not pathobj.is_file() ) or ( not os.access(pathobj, os.R_OK)) :
+            raise argparse.ArgumentTypeError(f"Error: Not readable fille : '{path_str}'")
+        return pathobj
+                
     def main(self):
         argprsr = argparse.ArgumentParser(add_help=False)
         if self.flg_symlink:
@@ -341,7 +355,7 @@ class PyEncase(object):
                     if sys.version_info < (3, 11):
                         raise ValueError(f'TOML is not supported in this python version ({sys.version_info}) : {fpath}')
                     else:
-                        import tomllib
+                        # import tomllib
                         with open(fpath, "rb") as fp:
                             data = tomllib.load(fp)
                             if argc.verbose:
@@ -364,7 +378,7 @@ class PyEncase(object):
                                         v_key = str(k).removeprefix('--').removeprefix('-').replace('-', '_')
                                         config_opts.__dict__[v_key] = v
                 elif fmt_type == 'ini':
-                    import configparser
+                    #import configparser
                     cnfgpsr = configparser.ConfigParser()
                     cnfgpsr.read(fpath, encoding=self.encoding)
                     if argc.verbose:
@@ -387,7 +401,7 @@ class PyEncase(object):
 
                 #elif fmt_type == 'json':
                 else: # Assume JSON as defult
-                    import json
+                    #import json
                     with open(fpath, "rb") as fp:
                         data = json.load(fp)
                         if argc.verbose:
@@ -445,10 +459,17 @@ class PyEncase(object):
             self.set_git_path(git_cmd=argpre.git_command)
 
             argprsrm.add_argument('-h', '--help', action='help') 
-
-            sbprsrs = argprsrm.add_subparsers(dest='subcommand')
             
-            parser_info = sbprsrs.add_parser('info', help='Show information')
+            sbprsrs = argprsrm.add_subparsers(dest='subcommand')
+
+            subcmd_parsers = {}
+            
+            def def_subcmd(subcmd, **kwargs):
+                sbpsr = sbprsrs.add_parser(subcmd, **kwargs)
+                subcmd_parsers[subcmd] = sbpsr
+                return sbpsr
+            
+            parser_info = def_subcmd('info', help='Show information')
             parser_info.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Show all path information')
             parser_info.add_argument('-l', '--long',    action='store_true', help='Show long description')
             parser_info.add_argument('-s', '--short',   action='store_true', help='Show minimum description')
@@ -459,15 +480,15 @@ class PyEncase(object):
             parser_info.set_defaults(handler=self.show_info)
 
 
-            parser_contents = sbprsrs.add_parser('contents', help='Show file list')
+            parser_contents = def_subcmd('contents', help='Show file list')
             parser_contents.add_argument('-v', '--verbose',     action='store_true', default=self.verbose, help='Show all path information')
             parser_contents.add_argument('-a', '--all',         action='store_true', help='Show all list')
             parser_contents.add_argument('-b', '--bin-script',  action='store_true', help='Show bin scripts')
             parser_contents.add_argument('-l', '--lib-script',  action='store_true', help='Show lib scripts')
-            parser_contents.add_argument('-m', '--modules-src', action='store_true', help='Show module sources')
+            parser_contents.add_argument('-m', '--module-src',  action='store_true', help='Show module sources')
             parser_contents.set_defaults(handler=self.show_contents)
 
-            parser_init = sbprsrs.add_parser('init', help='Initialise python script environment')
+            parser_init = def_subcmd('init', help='Initialise python script environment')
             parser_init.add_argument('-p', '--prefix',  default=self.prefix, help=('prefix of the directory tree. ' +
                                                                                        '(Default: Grandparent directory' +
                                                                                        ' if the name of parent directory of %s is bin,'
@@ -490,6 +511,9 @@ class PyEncase(object):
             parser_init.add_argument('-r', '--readme', action='store_true',        help='setup/update README.md')
 
             parser_init.add_argument('-m', '--module', default=[], action='append', help='install module by pip')
+
+            parser_init.add_argument('-i', '--install-dependency', action='store_true', help='install required module by pip')
+            
             parser_init.add_argument('-O', '--required-module', action='store_true', help='install modules/script-libs used in the template by pip')
             parser_init.add_argument('-s', '--script-lib', default=[], action='append', help='install library script from template.')
             parser_init.add_argument('-S', '--std-script-lib', action='store_true', help=('install standard library scripts. (equivalent to "' +
@@ -507,13 +531,18 @@ class PyEncase(object):
             parser_init.add_argument('-I', '--pip',  default=None, help='PIP path / command')
             parser_init.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
 
+            parser_init.add_argument('--conv-table',  type=self.__class__.argparse_path_chk,
+                                     default=None, help='Table file of conversion from import name to module name')
+            parser_init.add_argument('--dependency-file', type=self.__class__.argparse_path_chk,
+                                     default=None, help='Module requirement file')
+
             parser_init.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
             parser_init.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
 
             parser_init.add_argument('scriptnames', nargs='*', help='script file name to be created')
             parser_init.set_defaults(handler=self.manage_env)
             
-            parser_add = sbprsrs.add_parser('add', help='add new python script files')
+            parser_add = def_subcmd('add', help='add new python script files')
             parser_add.add_argument('-p', '--prefix',  default=self.prefix, help=('prefix of the directory tree. ' +
                                                                                       '(Default: Grandparent directory' +
                                                                                       ' if the name of parent directory of %s is bin,'
@@ -531,6 +560,7 @@ class PyEncase(object):
                                     help='Add sample KV file for GUI aplication')
 
             parser_add.add_argument('-m', '--module', default=[], action='append', help='install module by pip')
+            parser_add.add_argument('-i', '--install-dependency', action='store_true', help='install required module by pip')
             parser_add.add_argument('-O', '--required-module', action='store_true', help='install modules/script-libs used in the template by pip')
             parser_add.add_argument('-s', '--script-lib', default=[], action='append', help='install library script from template.')
             parser_add.add_argument('-S', '--std-script-lib', action='store_true', help=('install standard library scripts. (equivalent to "' +
@@ -541,6 +571,10 @@ class PyEncase(object):
             parser_add.add_argument('-P', '--python', default=None, help='Python path / command')
             parser_add.add_argument('-I', '--pip',  default=None, help='PIP path / command')
             parser_add.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
+            parser_add.add_argument('-T', '--conv-table',  type=self.__class__.argparse_path_chk,
+                                    default=None, help='Table file of conversion from import name to module name')
+            parser_add.add_argument('-R', '--dependency-file', type=self.__class__.argparse_path_chk,
+                                    default=None, help='Module requirement file')
 
             parser_add.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
             parser_add.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
@@ -548,7 +582,7 @@ class PyEncase(object):
             parser_add.add_argument('scriptnames', nargs='+', help='script file name to be created')
             parser_add.set_defaults(handler=self.manage_env)
 
-            parser_addlib = sbprsrs.add_parser('addlib', help='add new python library-script files')
+            parser_addlib = def_subcmd('addlib', help='add new python library-script files')
 
             parser_addlib.add_argument('-p', '--prefix',  default=self.prefix, help=('prefix of the directory tree. ' +
                                                                                          '(Default: Grandparent directory' +
@@ -562,6 +596,7 @@ class PyEncase(object):
             parser_addlib.add_argument('-D', '--template', help='Template File (default:' + str(self.__class__.ENTITY_FILE)+')')
 
             parser_addlib.add_argument('-m', '--module', default=[], action='append', help='install module by pip')
+            parser_addlib.add_argument('-i', '--install-dependency', action='store_true', help='install required (external) modules by pip')
             parser_addlib.add_argument('-O', '--required-module', action='store_true', help='install modules/script-libs used in the template by pip')
             parser_addlib.add_argument('-S', '--std-script-lib', action='store_true', help=('install standard library scripts. (equivalent to "' +
                                                                                                 ' '.join(['-s %s' % (m, ) for m 
@@ -572,13 +607,18 @@ class PyEncase(object):
             parser_addlib.add_argument('-I', '--pip',  default=None, help='PIP path / command')
             parser_addlib.add_argument('-G', '--git-command', default=self.git_path, help='git path / command')
 
+            parser_addlib.add_argument('-T', '--conv-table',  type=self.__class__.argparse_path_chk,
+                                       default=None, help='Table file of conversion from import name to module name')
+            parser_addlib.add_argument('-R', '--dependency-file', type=self.__class__.argparse_path_chk,
+                                       default=None, help='Module requirement file')
+
             parser_addlib.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
             parser_addlib.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
 
             parser_addlib.add_argument('script_lib', nargs='+', help='library-script file name to be created')
             parser_addlib.set_defaults(handler=self.manage_env)
 
-            parser_addkv = sbprsrs.add_parser('addkv', help='add new KIVY (KV-language) files')
+            parser_addkv = def_subcmd('addkv', help='add new KIVY (KV-language) files')
             parser_addkv.add_argument('-p', '--prefix',  default=self.prefix, help=('prefix of the directory tree. ' +
                                                                                         '(Default: Grandparent directory' +
                                                                                          ' if the name of parent directory of %s is bin,'
@@ -593,7 +633,7 @@ class PyEncase(object):
             parser_addkv.set_defaults(handler=self.manage_env)
 
 
-            parser_newmodule = sbprsrs.add_parser('newmodule', help='add new python-module source')
+            parser_newmodule = def_subcmd('newmodule', help='add new python-module source')
 
             parser_newmodule.add_argument('-p', '--prefix',  default=self.prefix, help=('prefix of the directory tree. ' +
                                                                                             '(Default: Grandparent directory' +
@@ -639,7 +679,7 @@ class PyEncase(object):
             parser_newmodule.set_defaults(handler=self.setup_newmodule)
 
             
-            parser_updatereadme = sbprsrs.add_parser('update_readme', help='Update readme file')
+            parser_updatereadme = def_subcmd('update_readme', help='Update readme file')
 
             parser_updatereadme.add_argument('-t', '--title',   help='Title text')
 
@@ -653,7 +693,7 @@ class PyEncase(object):
 
             parser_updatereadme.set_defaults(handler=self.manage_readme)
 
-            parser_init_git = sbprsrs.add_parser('init_git', help='Initialise git repository')
+            parser_init_git = def_subcmd('init_git', help='Initialise git repository')
 
             parser_init_git.add_argument('-m', '--module-src', help='Setup git for specified module source (not working environment)')
 
@@ -666,7 +706,7 @@ class PyEncase(object):
             parser_init_git.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
             parser_init_git.set_defaults(handler=self.manage_git)
 
-            parser_template = sbprsrs.add_parser('dump_template', help='Dump template part')
+            parser_template = def_subcmd('dump_template', help='Dump template part')
 
             parser_template.add_argument('-o', '--output',   help='Output to file (default: sys.stdout)')
             parser_template.add_argument('-D', '--template', help='Template File (default:' + str(self.__class__.ENTITY_FILE)+')')
@@ -676,18 +716,18 @@ class PyEncase(object):
 
             parser_template.set_defaults(handler=self.dump_template)
 
-            parser_clean = sbprsrs.add_parser('clean', help='clean-up of the working environment')
+            parser_clean = def_subcmd('clean', help='clean-up of the working environment')
             parser_clean.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
             parser_clean.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
             parser_clean.set_defaults(handler=self.clean_env)
 
-            parser_distclean = sbprsrs.add_parser('distclean', help='Entire clean-up of the working environment')
+            parser_distclean = def_subcmd('distclean', help='Entire clean-up of the working environment')
             parser_distclean.add_argument('-v', '--verbose', action='store_true', default=self.verbose, help='Verbose output')
             parser_distclean.add_argument('-n', '--dry-run', action='store_true', default=self.dry_run, help='Dry Run Mode')
             parser_distclean.set_defaults(handler=self.clean_env)
 
-            #parser_selfupdate = sbprsrs.add_parser('selfupdate', help='Self update of '+os.path.basename(__file__))
-            parser_selfupdate = sbprsrs.add_parser('selfupdate', 
+            #parser_selfupdate = def_subcmd('selfupdate', help='Self update of '+os.path.basename(__file__))
+            parser_selfupdate = def_subcmd('selfupdate', 
                                                    help='Self update of '
                                                    +self.__class__.ENTITY_FILE_NAME)
 
@@ -700,45 +740,68 @@ class PyEncase(object):
 
             for c,cc in self.__class__.PIP_SBCMDS_ACCEPT.items():
                 _scmd = c if cc is None else cc
-                _prsr_add = sbprsrs.add_parser(_scmd, 
+                _prsr_add = def_subcmd(_scmd, 
                                                help=('PIP command : %s' % (c,)))
                 _prsr_add.add_argument('pip_subcommand_args', nargs='*', help='Arguments for pip subcommands')
-                _prsr_add.set_defaults(handler=self.invoke_pip)
-
+                _prsr_add.set_defaults(handler=self.invoke_pip, pip_subcommand=c)
             #
-            parser_showdeps = sbprsrs.add_parser('show_deps', help='Show dependency')
+            parser_showdeps = def_subcmd('show_deps', help='Show dependency')
             parser_showdeps.add_argument('-v', '--verbose',     action='store_true', default=self.verbose, help='Show verbose information')
             parser_showdeps.add_argument('-a', '--all',         action='store_true', help='Show all list')
             parser_showdeps.add_argument('-b', '--bin-script',  action='store_true', help='Show bin scripts')
             parser_showdeps.add_argument('-l', '--lib-script',  action='store_true', help='Show lib scripts')
-            parser_showdeps.add_argument('-m', '--modules-src', action='store_true', help='Show module sources')
-            parser_showdeps.add_argument('-D', '--dump',        action='store_true', default=True, help='Show to stdout')
+            parser_showdeps.add_argument('-m', '--module-src',  action='store_true', help='Show module sources')
+            parser_showdeps.add_argument('-D', '--no-dump',     action='store_false', dest='dump', default=True, help='Suppress stdout output')
+            parser_showdeps.add_argument('-T', '--conv-table',  type=self.__class__.argparse_path_chk,
+                                         default=None, help='Table file of conversion from import name to module name')
+            parser_showdeps.add_argument('-R', '--dependency-file', type=self.__class__.argparse_path_chk,
+                                         default=None, help='Module requirement file')
             parser_showdeps.set_defaults(handler=self.show_dependency)
 
-            parser_installdeps = sbprsrs.add_parser('install_deps', help='Try install dependency')
+            parser_installdeps = def_subcmd('install_deps', help='Try install dependency')
             parser_installdeps.add_argument('-v', '--verbose',     action='store_true', default=self.verbose, help='Show verbose information')
             parser_installdeps.add_argument('-n', '--dry-run',     action='store_true', default=self.dry_run, help='Dry run mode')
             parser_installdeps.add_argument('-a', '--all',         action='store_true', help='Show all list')
             parser_installdeps.add_argument('-b', '--bin-script',  action='store_true', help='Show bin scripts')
             parser_installdeps.add_argument('-l', '--lib-script',  action='store_true', help='Show lib scripts')
-            parser_installdeps.add_argument('-m', '--modules-src', action='store_true', help='Show module sources')
-            parser_installdeps.add_argument('-D', '--dump',        action='store_false', default=False, help='Show to stdout')
+            parser_installdeps.add_argument('-m', '--module-src',  action='store_true', help='Show module sources')
+            parser_installdeps.add_argument('-D', '--dump',        action='store_true', default=False, help='Show to stdout')
+            parser_installdeps.add_argument('-T', '--conv-table',  type=self.__class__.argparse_path_chk,
+                                            default=None, help='Table file of conversion from import name to module name')
+            parser_installdeps.add_argument('-R', '--dependency-file', type=self.__class__.argparse_path_chk,
+                                            default=None, help='Module requirement file')
             parser_installdeps.add_argument('pip_subcommand_args', nargs='*', help='Arguments for pip subcommands')
             parser_installdeps.set_defaults(handler=self.install_dependency)
 
+            parser_help = def_subcmd('help', help="Show help for a subcommand")
+            parser_help.add_argument("command", nargs="?")
+            
             #argps= argprsrm.parse_args()
             argps,restps = argprsrm.parse_known_args(restpre, namespace=argpre) # namespace=config_opts
             #self.set_python_path(python_cmd=argps.python, pip_cmd=argps.pip, 
             #                     prefix_cmd=(argps.prefix if hasattr(argps, 'prefix') else None))
             if hasattr(argps, 'handler'):
                 argps.handler(argps, restps)
+            elif argps.subcommand == "help":
+                if not argps.command:
+                    argprsrm.print_help()
+                    return 0
+                parser = subcmd_parsers.get(argps.command)
+                if parser is None:
+                    self.streams.stderr.write(f"Unknown subcommand: '{argps.command}'")
+                    self.streams.stderr.write("Use 'py-encase help' to list available subcommands.")
+                    return 1
+
+                parser.print_help()
+                return 0
             else:
                 argprsrm.print_usage()
             
     def invoke_pip(self, args:argparse.Namespace, rest:list=[]):
         flg_verbose = args.verbose if hasattr(args, 'verbose') else False
         flg_dry_run  = args.dry_run  if hasattr(args, 'dry_run') else False
-        return self.run_pip(subcmd=args.subcommand,
+        subcmd = args.pip_subcommand if hasattr(args, 'pip_subcommand') else args.subcommand
+        return self.run_pip(subcmd=subcmd,
                             args=args.pip_subcommand_args+rest,
                             verbose=flg_verbose, dry_run=flg_dry_run)
     @classmethod
@@ -1066,6 +1129,58 @@ class PyEncase(object):
     def all_dir_list(self):
         return self.pkg_dir_list() + self.pip_dir_list()
 
+
+    def read_dict(self, path):
+        pathobj = path if isinstance(path, pathlib.Path) else pathlib.Path(path)
+        buf = {}
+
+        if pathobj.suffix == '.json':
+            with open(pathobj, "rb") as fp:
+                data = json.load(fp)
+                if isinstance(data, dict):
+                    buf.update(data)
+                elif isinstance(data, (list, set)):
+                    for x in data:
+                        if not x:
+                            continue
+                        chunk = self.__class__.NON_PYIDF_PATTERN.split(str(x))
+                        if not chunk[0]:
+                            continue
+                        if ( len(chunk)>1 ) :
+                            buf.update({ chunk[0]: chunk[1] })
+                        else:
+                            buf.update({ chunk[0]: chunk[0] })
+                else:
+                    buf.update({ str(data): str(data) })
+        elif pathobj.suffix == '.toml':
+            if sys.version_info < (3, 11):
+                raise ValueError(f'TOML is not supported in this python version ({sys.version_info}) : {path}')
+            else:
+                with open(pathobj, "rb") as fp:
+                    data = tomllib.load(fp)
+                    for secsion in ['DEFAULT', 'requirements', 'modules', 'packages']:
+                        buf.update( { k: v for k,v in data.get(secsion,{}).items() if k } )
+        elif pathobj.suffix == '.ini':
+            cnfgpsr = configparser.ConfigParser()
+            cnfgpsr.read(pathobj, encoding=self.encoding)
+            for k,v in cnfgpsr.defaults().items():
+                if not k:
+                    continue                
+                buf.update( { k: v } )
+        else: # assume text file 
+            chunks = []
+            with open(pathobj, "r") as fp:
+                chunks.extend(self.__class__.SPACENL_PATTERN.split(fp.read()))
+            for x in chunks:
+                if not x:
+                    continue                
+                chunk = self.__class__.NON_PYIDF_PATTERN.split(str(x))
+                if ( len(chunk)>1 ) :
+                    buf.update({ chunk[0]: chunk[1] })
+                else:
+                    buf.update({ chunk[0]: chunk[0] })
+        return buf
+    
     def show_dependency(self, args:argparse.Namespace, rest:list=[]):
         flg_verbose = args.verbose       if hasattr(args, 'verbose')       else self.verbose
         flg_all     = args.all           if hasattr(args, 'all')           else False
@@ -1073,7 +1188,49 @@ class PyEncase(object):
         flg_lib     = args.lib_script    if hasattr(args, 'lib_script')    else False
         flg_mod     = args.module_src    if hasattr(args, 'module_src')    else False
         flg_dump    = args.dump          if hasattr(args, 'dump')          else True
+
+        cnv_tble_file   = args.conv_table      if hasattr(args, 'conv_table')      else None
+        dependency_file = args.dependency_file if hasattr(args, 'dependency_file') else None
+
+        cnv_tbl     = {}
+        req_modules = {}
+
+        cnv_tbl.update( self.__class__.KNOWN_IMPORT_NAME_TO_MODULE_NAME )
         
+        if sys.version_info < (3, 11):
+            suffixes = [ '.json',         '.ini', '.txt', '' ]
+        else:            
+            suffixes = [ '.json', '.toml', '.ini', '.txt', '']
+        
+        if cnv_tble_file is not None:
+            cnv_tbl.update(self.read_dict(cnv_tble_file))
+        else:
+            for subdir in [ os.path.join(self.datadir, 'python'),
+                            self.datadir, self.python_pip_path, self.python_path ]:
+                for suffix in suffixes:
+                    fpth = os.path.join(subdir, self.__class__.FILENAME_DEFAULT['____MODULE_TABLE_BASE____']+suffix)
+                    fpthobj = pathlib.Path(fpth)
+                    if ( ( not fpthobj.exists() ) or
+                         ( not fpthobj.is_file() ) or
+                         ( not os.access(fpthobj, os.R_OK)) ):
+                        continue
+                    cnv_tbl.update(self.read_dict(fpthobj))
+
+        if dependency_file is not None:
+            req_modules.update(self.read_dict(dependency_file))
+        else:
+            for subdir in [ os.path.join(self.datadir, 'python'),
+                            self.datadir, self.python_pip_path, self.python_path ]:
+                for suffix in suffixes:
+                    fpth = os.path.join(subdir, self.__class__.FILENAME_DEFAULT['____MODULE_REQUIRED_BASE__']+suffix)
+                    fpthobj = pathlib.Path(fpth)
+                    if ( ( not fpthobj.exists() ) or
+                         ( not fpthobj.is_file() ) or
+                         ( not os.access(fpthobj, os.R_OK)) ):
+                        continue
+                    req_modules.update(self.read_dict(fpthobj))
+        cnv_tbl.update(req_modules)
+
         if not ( flg_bin or flg_lib or flg_mod ) :
             flg_all = True
 
@@ -1120,13 +1277,14 @@ class PyEncase(object):
 
         if flg_verbose:
             for dep,src in _buf.items():
-                self.stderr.write(("%-9s %s" % (str(dep)+" --> "+self.import_name_to_pip_bame(str(dep))+" :", ', '.join(src))))
+                self.stderr.write(("%-9s %s" % (str(dep)+" --> "+self.import_name_to_pip_name(str(dep), cnv_table=cnv_tbl)+" :", ', '.join(src))))
 
-        req_mod_list = [ self.import_name_to_pip_bame(x) for x in _buf.keys() ]
+        req_mod_list = [ self.import_name_to_pip_name(x, cnv_table=cnv_tbl) for x in _buf.keys() ]
         if flg_dump:
             print(" ".join(req_mod_list))
-        
-        return req_mod_list
+            
+        # return req_mod_list
+        return list(set(req_mod_list)|set(req_modules.keys()))
 
     def install_dependency(self, args:argparse.Namespace, rest:list=[]):
         flg_verbose = args.verbose       if hasattr(args, 'verbose')       else self.verbose
@@ -1135,13 +1293,19 @@ class PyEncase(object):
         flg_bin     = args.bin_script    if hasattr(args, 'bin_script')    else False
         flg_lib     = args.lib_script    if hasattr(args, 'lib_script')    else False
         flg_mod     = args.module_src    if hasattr(args, 'module_src')    else False
-        flg_dump    = args.dump          if hasattr(args, 'dump')          else True
+        flg_dump    = args.dump          if hasattr(args, 'dump')          else False
+
+        cnv_tble_file   = args.conv_table      if hasattr(args, 'conv_table')      else None
+        dependency_file = args.dependency_file if hasattr(args, 'dependency_file') else None
+
         req_mod_list = self.show_dependency(args=args, rest=rest)
         if flg_verbose:
             self.stderr.write("Try pip install : %s" % (', '.join(req_mod_list), ))
 
+        pip_args = getattr(args, 'pip_subcommand_args', [])
+
         return self.run_pip(subcmd='install',
-                            args=args.pip_subcommand_args+rest+req_mod_list,
+                            args=pip_args+rest+req_mod_list,
                             verbose=flg_verbose, dry_run=flg_dry_run)
         
                 
@@ -1179,12 +1343,12 @@ class PyEncase(object):
                     imported_modules.add(cntxt_nd.module)
         return list(imported_modules)
 
-    def import_name_to_pip_bame(self, import_name):
+    def import_name_to_pip_name(self, import_name, cnv_table=None):
+        ctbl = self.__class__.KNOWN_IMPORT_NAME_TO_MODULE_NAME if cnv_table is None else cnv_table
         names=import_name.split(".")
         for n in [".".join(names[:i]) for i in range(len(names), 0, -1)]:
-            if n in self.__class__.KNOWN_IMPORT_NAME_TO_MODULE_NAME:
-                return self.__class__.KNOWN_IMPORT_NAME_TO_MODULE_NAME[n]
-
+            if n in ctbl:
+                return ctbl[n]
         if "_" in names[0]:
             self.stderr.write("Warning: import name %s : underscore is replaced %s" % (names[0], names[0].replace("_", "-")))
         
@@ -1258,7 +1422,7 @@ class PyEncase(object):
     def rename_with_mtime_suffix(cls, file_path, add_sufix=None, dest_dir=None, verbose=False, dry_run=False):
         if not os.path.exists(file_path):
             if verbose or dry_run:
-                self.stderr.write("File not found : '%s'" % (file_path, ))
+                cls.StreamExtd().stderr.write("File not found : '%s'" % (file_path, ))                                            
             return None
 
         mtime  = os.path.getmtime(file_path)
@@ -1421,13 +1585,13 @@ class PyEncase(object):
         """
         def __init__(self, 
                      stdin:_io.TextIOWrapper=sys.stdin,
-                     stderr:_io.TextIOWrapper=sys.stdout,
-                     stdout:_io.TextIOWrapper=sys.stderr):
+                     stdout:_io.TextIOWrapper=sys.stdout,
+                     stderr:_io.TextIOWrapper=sys.stderr):
             streams_t = collections.namedtuple('streams',
                                                ['stdin', 'stdout','stderr'])
             self.streams = streams_t(stdin=self.__class__.StreamIF(sys.stdin),
-                                     stderr=self.__class__.StreamIF(sys.stdout),
-                                     stdout=self.__class__.StreamIF(sys.stderr))
+                                     stdout=self.__class__.StreamIF(sys.stdout),
+                                     stderr=self.__class__.StreamIF(sys.stderr))
     
         @property
         def stdin(self):
@@ -3039,6 +3203,10 @@ class PyEncase(object):
         if len(modules)>0:
             self.run_pip(subcmd='install', args=modules, verbose=flg_verbose, dry_run=flg_dry_run)
 
+        if hasattr(args, 'install_dependency') and args.install_dependency:
+            args.__dict__['all'] = True
+            args.__dict__['dump'] = False
+            self.install_dependency(args=args)
 
     def manage_readme(self, args:argparse.Namespace, rest:list=[]):
         subcmd = args.subcommand if hasattr(args, 'subcommand') else 'unknown'
