@@ -34,7 +34,7 @@ import importlib.util
 import keyword
 import pkgutil
 
-__version__ = '0.0.34'
+__version__ = '0.0.35'
 
 class PyEncase(object):
 
@@ -81,17 +81,42 @@ class PyEncase(object):
                            'SSH_COMMAND'   : 'ssh',
                            'REMOTE_ALIAS'  : 'origin'}
 
-    MODULES_USED_MAIN_TEMPLATE       = ['pytz', 'tzlocal', 'pkgstruct']
-    MODULES_USED_MAIN_FRMWK_TEMPLATE = ['pytz', 'tzlocal', 'pkgstruct', 
-                                        'argparse_extd', 'psutil', 'sshkeyring',
-                                        'enc_ds', 'plyer', 'pyobjus', 'kivy']
+    SCRIPT_TEMPLATE_STYLES = {
+        'simple': {
+            'start': r'\s*#{5,}\s*____PY_MAIN_TEMPLATE_START____\s*#{5,}',
+            'end':   r'\s*#{5,}\s*____PY_MAIN_TEMPLATE_END____\s*#{5,}',
+            'modules': ['pytz', 'tzlocal', 'pkgstruct'],
+            'script_libs': [],
+            'use_kivy'   : False,     
+        },
+        'app-framework': {
+            'start': r'\s*#{5,}\s*____PY_MAIN_APP_FRAMEWORK_TEMPLATE_START____\s*#{5,}',
+            'end':   r'\s*#{5,}\s*____PY_MAIN_APP_FRAMEWORK_TEMPLATE_END____\s*#{5,}',
+            'modules': ['pytz', 'tzlocal', 'pkgstruct', 'argparse_extd', 'psutil', 'sshkeyring', 'enc_ds',
+                        'Pillow', 'plyer', 'pyobjus', 'kivy', 'PySDL2' ],
+            'script_libs': ['streamextd'],
+            'use_kivy'   : True,
+        },
+    }
 
-    MODULES_USED_LIB_SCRIPT_TEMPLATE = [] # ['PyYAML']
+    SCRIPT_TEMPLATE_STYLES_DEFAULT='simple'
+    
+    LIB_TEMPLATE_STYLES = {
+        'simple': {
+            'start': r'\s*#{5,}\s*____PY_LIB_SCRIPT_TEMPLATE_START____\s*#{5,}',
+            'end':   r'\s*#{5,}\s*____PY_LIB_SCRIPT_TEMPLATE_END____\s*#{5,}',
+            'modules':     [],
+            'script_libs': [],
+        },
+        # 'class': {
+        #     'start': r'\s*#{5,}\s*____PY_LIB_CLASS_TEMPLATE_START____\s*#{5,}',
+        #     'end':   r'\s*#{5,}\s*____PY_LIB_CLASS_TEMPLATE_END____\s*#{5,}',
+        #     'modules':     [],
+        #     'script_libs': [],
+        # },
+    }
 
-    SCRLIB_USED_MAIN_TEMPLATE       = []
-    SCRLIB_USED_MAIN_FRMWK_TEMPLATE = ['streamextd']
-
-    SCRLIB_USED_LIB_SCRIPT_TEMPLATE = []
+    LIB_TEMPLATE_STYLES_DEFAULT = 'simple'
 
     KNOWN_IMPORT_NAME_TO_MODULE_NAME = { "cv2":                "opencv-python",
                                          "PIL":                "Pillow",
@@ -500,10 +525,23 @@ class PyEncase(object):
 
             parser_init.add_argument('-D', '--template', help='Template File (default:' + str(self.__class__.ENTITY_FILE)+')')
 
-            parser_init.add_argument('-F', '--app-framework', action='store_true', default=False, 
-                                     help='Use template with application framework')
-            parser_init.add_argument('-B', '--bare-script',   action='store_false', dest='app_framework',
+            parser_init.add_argument('-x', '--script-template-style',
+                                    default=self.__class__.SCRIPT_TEMPLATE_STYLES_DEFAULT,
+                                    choices=self.__class__.SCRIPT_TEMPLATE_STYLES.keys(), help='Template style')
+
+            parser_init.add_argument('-y', '--scrlib-template-style',
+                                     default=self.__class__.LIB_TEMPLATE_STYLES_DEFAULT,
+                                     choices=self.__class__.LIB_TEMPLATE_STYLES.keys(),
+                                     help='Built-in library template style')
+
+            parser_init.add_argument('-F', '--app-framework',
+                                     dest='script_template_style', action='store_const',
+                                     const='app-framework',  help='Use template with application framework')
+            parser_init.add_argument('-B', '--simple-script', '--bare-script',
+                                     dest='script_template_style', action='store_const',
+                                     const=self.__class__.SCRIPT_TEMPLATE_STYLES_DEFAULT,
                                      help='Use template without application framework')
+
             parser_init.add_argument('-K', '--gui-kvfile', type=str, nargs='?', const=None, default=None,
                                          help='Add sample KV file for GUI aplication')
 
@@ -552,10 +590,19 @@ class PyEncase(object):
 
             parser_add.add_argument('-D', '--template', help='Template File (default:' + str(self.__class__.ENTITY_FILE)+')')
 
-            parser_add.add_argument('-F', '--app-framework', action='store_true',  default=False,
-                                    help='Use template with application framework')
-            parser_add.add_argument('-B', '--bare-script',   action='store_false', dest='app_framework',
+            
+            parser_add.add_argument('-x', '--script-template-style',
+                                    default=self.__class__.SCRIPT_TEMPLATE_STYLES_DEFAULT,
+                                    choices=self.__class__.SCRIPT_TEMPLATE_STYLES.keys(), help='Template style')
+            
+            parser_add.add_argument('-F', '--app-framework',
+                                    dest='script_template_style', action='store_const',
+                                    const='app-framework',  help='Use template with application framework')
+            parser_add.add_argument('-B', '--simple-script', '--bare-script',
+                                    dest='script_template_style', action='store_const',
+                                    const=self.__class__.SCRIPT_TEMPLATE_STYLES_DEFAULT,
                                     help='Use template without application framework')
+
             parser_add.add_argument('-K', '--gui-kvfile', type=str, nargs='?', const=None, default=None,
                                     help='Add sample KV file for GUI aplication')
 
@@ -594,6 +641,11 @@ class PyEncase(object):
 
 
             parser_addlib.add_argument('-D', '--template', help='Template File (default:' + str(self.__class__.ENTITY_FILE)+')')
+
+            parser_addlib.add_argument('-y', '--scrlib-template-style',
+                                       default=self.__class__.LIB_TEMPLATE_STYLES_DEFAULT,
+                                       choices=self.__class__.LIB_TEMPLATE_STYLES.keys(),
+                                       help='Built-in library template style')
 
             parser_addlib.add_argument('-m', '--module', default=[], action='append', help='install module by pip')
             parser_addlib.add_argument('-i', '--install-dependency', action='store_true', help='install required (external) modules by pip')
@@ -1295,14 +1347,13 @@ class PyEncase(object):
         flg_mod     = args.module_src    if hasattr(args, 'module_src')    else False
         flg_dump    = args.dump          if hasattr(args, 'dump')          else False
 
-        cnv_tble_file   = args.conv_table      if hasattr(args, 'conv_table')      else None
-        dependency_file = args.dependency_file if hasattr(args, 'dependency_file') else None
+        cnv_tble_file   = args.conv_table          if hasattr(args, 'conv_table')      else None
+        dependency_file = args.dependency_file     if hasattr(args, 'dependency_file') else None
+        pip_args        = args.pip_subcommand_args if hasattr(args, 'pip_subcommand_args') else []
 
         req_mod_list = self.show_dependency(args=args, rest=rest)
         if flg_verbose:
             self.stderr.write("Try pip install : %s" % (', '.join(req_mod_list), ))
-
-        pip_args = getattr(args, 'pip_subcommand_args', [])
 
         return self.run_pip(subcmd='install',
                             args=pip_args+rest+req_mod_list,
@@ -3064,22 +3115,26 @@ class PyEncase(object):
         scrptlibs = args.script_lib  if hasattr(args, 'script_lib') else []
         scripts   = args.scriptnames if hasattr(args, 'scriptnames') else []
 
-        flg_frmwk  = args.app_framework if hasattr(args, 'app_framework') else False
         opt_kvfile = args.gui_kvfile    if hasattr(args, 'gui_kvfile')    else None
+
+        script_template_style = args.script_template_style if hasattr(args, 'script_template_style') else self.__class__.SCRIPT_TEMPLATE_STYLES_DEFAULT
+        scrlib_template_style = args.scrlib_template_style if hasattr(args, 'scrlib_template_style') else self.__class__.LIB_TEMPLATE_STYLES_DEFAULT
+
+        script_tmplt_info = self.__class__.SCRIPT_TEMPLATE_STYLES.get(script_template_style)
+        scrlib_tmplt_info = self.__class__.LIB_TEMPLATE_STYLES.get(scrlib_template_style)
+        
+        flg_use_kivy  = script_tmplt_info.get('use_kivy', False)
 
         if subcmd in ('init', 'add'):
             if hasattr(args, 'required_module') and args.required_module:
-                module_used = (self.__class__.MODULES_USED_MAIN_FRMWK_TEMPLATE
-                               if flg_frmwk else
-                               self.__class__.MODULES_USED_MAIN_TEMPLATE)
+                module_used = script_tmplt_info.get('modules', [])
+                
                 for m in module_used:
                     if m in modules:
                         continue
                     modules.append(m)
 
-            scrlibs_used = (self.__class__.SCRLIB_USED_MAIN_FRMWK_TEMPLATE
-                            if flg_frmwk else
-                            self.__class__.SCRLIB_USED_MAIN_TEMPLATE)
+            scrlibs_used = script_tmplt_info.get('script_libs', [])
 
             for _scrlib in scrlibs_used:
                 if _scrlib in scrptlibs or (_scrlib+'.py') in scrptlibs:
@@ -3087,14 +3142,18 @@ class PyEncase(object):
                 scrptlibs.append(_scrlib)
 
         if subcmd == ('addlib'):
+
+            module_used = scrlib_tmplt_info.get('modules', [])
+
             if hasattr(args, 'required_module') and args.required_module:
-                for m in self.__class__.MODULES_USED_LIB_SCRIPT_TEMPLATE:
+                for m in module_used:
                     if m in modules:
                         continue
                     modules.append(m)
 
+            scrlibs_used = scrlib_tmplt_info.get('script_libs', [])
 
-            for _scrlib in self.__class__.SCRLIB_USED_LIB_SCRIPT_TEMPLATE:
+            for _scrlib in scrlibs_used:
                 if _scrlib in scrptlibs or (_scrlib+'.py') in scrptlibs:
                     continue
                 scrptlibs.append(_scrlib)
@@ -3113,7 +3172,7 @@ class PyEncase(object):
         elif subcmd in ('init', 'add'):
             if opt_kvfile and len(opt_kvfile)>0:
                 kvfiles.append(opt_kvfile.removesuffix('.kv') + '.kv')
-            elif flg_frmwk or (opt_kvfile is not None):
+            elif flg_use_kivy or (opt_kvfile is not None):
                 for x in scripts:
                     kvfiles.append(x.removesuffix('.py') + '.kv')
 
@@ -3188,10 +3247,14 @@ class PyEncase(object):
 
         self.add_pyscr(basename=[x.removesuffix('.py') for x in scripts],
                        input_file=tmplt_file, keywords=keyword_buf,
-                       use_framework=flg_frmwk, verbose=flg_verbose, dry_run=flg_dry_run)
-                
+                       start_marker=script_tmplt_info.get('start', r'\s*#{5,}\s*____PY_MAIN_TEMPLATE_START____\s*#{5,}'),
+                       end_marker=script_tmplt_info.get('end',     r'\s*#{5,}\s*____PY_MAIN_TEMPLATE_END____\s*#{5,}'),
+                       verbose=flg_verbose, dry_run=flg_dry_run)
+
         self.add_pylib(basename=[x.removesuffix('.py') for x in scrptlibs],
                        input_file=tmplt_file, keywords=keyword_buf,
+                       start_marker=scrlib_tmplt_info.get('start', r'\s*#{5,}\s*____PY_LIB_SCRIPT_TEMPLATE_START____\s*#{5,}'),
+                       end_marker=scrlib_tmplt_info.get('end',     r'\s*#{5,}\s*____PY_LIB_SCRIPT_TEMPLATE_END____\s*#{5,}'),
                        verbose=flg_verbose, dry_run=flg_dry_run)
 
 
@@ -3592,11 +3655,15 @@ class PyEncase(object):
         return chanks
 
     def add_pyscr(self, basename, input_file=None, keywords={},
-                  use_framework=False, verbose=False, dry_run=False):
+                  start_marker=r'\s*#{5,}\s*____PY_MAIN_TEMPLATE_START____\s*#{5,}',
+                  end_marker=r'\s*#{5,}\s*____PY_MAIN_TEMPLATE_END____\s*#{5,}',
+                  verbose=False, dry_run=False):
+
         if isinstance(basename, list):
             for bn in basename:
                 self.add_pyscr(bn, input_file=input_file, keywords=keywords,
-                               use_framework=use_framework,
+                               start_marker=start_marker,
+                               end_marker=end_marker,
                                verbose=verbose, dry_run=dry_run)
             return
 
@@ -3618,16 +3685,11 @@ class PyEncase(object):
                 str_format.update(keywords)
 
                 code_filter = self.__class__.PyCodeFilter(self.python_shebang, keyword_table=str_format)
-
-                if use_framework:
-                    smrkr = r'\s*#{5,}\s*____PY_MAIN_APP_FRAMEWORK_TEMPLATE_START____\s*#{5,}'
-                    emrkr = r'\s*#{5,}\s*____PY_MAIN_APP_FRAMEWORK_TEMPLATE_END____\s*#{5,}'
-                else:
-                    smrkr = r'\s*#{5,}\s*____PY_MAIN_TEMPLATE_START____\s*#{5,}'
-                    emrkr = r'\s*#{5,}\s*____PY_MAIN_TEMPLATE_END____\s*#{5,}'
-
+ 
                 self.__class__.EmbeddedText.extract_to_file(outfile=scr_path,infile=input_file,
-                                                            s_marker=smrkr, e_marker=emrkr,
+                                                            s_marker=start_marker,
+                                                            e_marker=end_marker,
+                                                            # s_marker=smrkr, e_marker=emrkr,
                                                             include_markers=False, multi_match=False, dedent=True, 
                                                             skip_head_emptyline=True, skip_tail_emptyline=True,
                                                             dequote=False, format_filter=code_filter, 
@@ -3642,10 +3704,16 @@ class PyEncase(object):
                                              dry_run=dry_run, verbose=verbose)
 
 
-    def add_pylib(self, basename, input_file=None, keywords={}, verbose=False, dry_run=False):
+    def add_pylib(self, basename, input_file=None, keywords={},
+                  start_marker=r'\s*#{5,}\s*____PY_LIB_SCRIPT_TEMPLATE_START____\s*#{5,}',
+                  end_marker=r'\s*#{5,}\s*____PY_LIB_SCRIPT_TEMPLATE_END____\s*#{5,}',
+                  verbose=False, dry_run=False):
+
         if isinstance(basename, list):
             for bn in basename:
-                self.add_pylib(bn, input_file=input_file, keywords=keywords, verbose=verbose, dry_run=dry_run)
+                self.add_pylib(bn, input_file=input_file, keywords=keywords,
+                               start_marker=start_marker, end_marker=end_marker,
+                               verbose=verbose, dry_run=dry_run)
             return
 
         scr_path = os.path.join(self.python_path, basename+'.py')
@@ -3667,8 +3735,9 @@ class PyEncase(object):
                     code_filter = self.__class__.PyCodeFilter(self.python_shebang, keyword_table=str_format)
 
                     self.__class__.EmbeddedText.extract_to_file(outfile=scr_path, infile=input_file,
-                                                                s_marker=r'\s*#{5,}\s*____PY_LIB_SCRIPT_TEMPLATE_START____\s*#{5,}',
-                                                                e_marker=r'\s*#{5,}\s*____PY_LIB_SCRIPT_TEMPLATE_END____\s*#{5,}',
+                                                                s_marker=start_marker, e_marker=end_marker,
+                                                                #s_marker=r'\s*#{5,}\s*____PY_LIB_SCRIPT_TEMPLATE_START____\s*#{5,}',
+                                                                #e_marker=r'\s*#{5,}\s*____PY_LIB_SCRIPT_TEMPLATE_END____\s*#{5,}',
                                                                 include_markers=False, multi_match=False,dedent=True, 
                                                                 skip_head_emptyline=True, skip_tail_emptyline=True,
                                                                 dequote=False, format_filter=code_filter, 
@@ -4063,7 +4132,6 @@ class PyEncase(object):
 
         if outfile is not None:
             fout.close()
-
 
     class PyCodeFilter(object):
 
@@ -4621,6 +4689,9 @@ if __name__=='__main__':
                 # Control the standard output by KIVY
                 if not argprsr.args.verbose:
                     os.environ['KIVY_NO_CONSOLELOG'] = '1'
+                # Specify the KIVY image
+                # os.environ['KIVY_WINDOW'] = 'sdl2'
+                # os.environ['KIVY_IMAGE']  = 'sdl2,pil'
                 # Specify the location of log output by KIVY
                 import kivy.config
                 kivy.config.Config.set("kivy", "log_dir", self.pkg_info.pkg_logdir)

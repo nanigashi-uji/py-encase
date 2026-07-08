@@ -325,8 +325,10 @@ Bootstrap a brand-new execution environment under a given prefix: directory stru
 | `-p, --prefix PATH` | Prefix of the directory tree (see global option) |
 | `-t, --title TEXT` | Project title, used in the generated `README.md` |
 | `-D, --template PATH` | Template file to use (default: `py_encase.py` itself) |
+| `-x, --script-template-style STYLE` | Select a built-in script template style. Currently supported: `simple`, `app-framework`. The default is `simple`. |
+| `-y, --scrlib-template-style STYLE` | Select a built-in script-library template style. Currently supported: `simple`. |
 | `-F, --app-framework` | Use the template variant that includes the application framework (GUI/argparse-extd helpers) |
-| `-B, --bare-script` | Use the bare template without the application framework (opposite of `-F`) |
+| `-B, --simple-script`, `--bare-script` | Use the simple built-in script template without the application framework. `--bare-script` is kept as a backward-compatible alias for `--simple-script`. |
 | `-K, --gui-kvfile [NAME]` | Also create a sample Kivy `.kv` file for a GUI application |
 | `-r, --readme` | Create/update `README.md` |
 | `-m, --module NAME` | Install an extra module via pip (repeatable) |
@@ -364,8 +366,9 @@ Add one or more new script files to an existing environment (creates the `lib/py
 | `-p, --prefix PATH` | Prefix of the directory tree |
 | `-r, --readme` | Update `README.md` after adding the script(s) |
 | `-D, --template PATH` | Template file to use |
+| `-x, --script-template-style STYLE` | Select a built-in script template style. Currently supported: `simple`, `app-framework`. The default is `simple`. |
 | `-F, --app-framework` | Use the application-framework template variant |
-| `-B, --bare-script` | Use the bare template variant |
+| `-B, --simple-script`, `--bare-script` | Use the simple built-in script template. `--bare-script` is a backward-compatible alias. |
 | `-K, --gui-kvfile [NAME]` | Also create a sample Kivy `.kv` file |
 | `-m, --module NAME` | Install an extra module via pip (repeatable) |
 | `-i, --install-dependency` | Auto-detect and install modules required by the new script |
@@ -381,6 +384,27 @@ Add one or more new script files to an existing environment (creates the `lib/py
 ```bash
 mng_encase add -v another_tool
 mng_encase add -r -i second_tool third_tool   # two scripts at once, auto-install deps, update README
+```
+
+### Built-in script template styles
+
+The `init` and `add` subcommands can choose a built-in script template style.
+
+| Option | Equivalent style | Description |
+|--------|------------------|-------------|
+| `--script-template-style simple` | `simple` | The default simple script template. |
+| `--script-template-style app-framework` | `app-framework` | The application-framework template. |
+| `-B, --simple-script` | `simple` | Shortcut for the simple script template. |
+| `--bare-script` | `simple` | Backward-compatible alias for `--simple-script`. |
+| `-F, --app-framework` | `app-framework` | Shortcut for the application-framework template. |
+
+Examples:
+
+```bash
+mng_encase init --script-template-style simple --prefix ./my-tool my_tool.py
+mng_encase add --simple-script helper_tool.py
+mng_encase add --bare-script legacy_name.py      # alias of --simple-script
+mng_encase add --app-framework gui_tool.py
 ```
 
 ### `addlib`
