@@ -34,7 +34,7 @@ import importlib.util
 import keyword
 import pkgutil
 
-__version__ = '0.0.35'
+__version__ = '0.0.36'
 
 class PyEncase(object):
 
@@ -4545,7 +4545,7 @@ if __name__=='__main__':
                     print("%-2d : %s" % (i+1, p))
                     hdr_str = ""
             
-                #pkg_info   = pkgstruct.PkgStructure(script_path=sys.argv[0])
+                #pkg_info   = pkgstruct.PkgStruct(script_path=sys.argv[0])
                 #pkg_info.dump(relpath=False, with_seperator=True)
         
         if __name__ == '__main__':
