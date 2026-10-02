@@ -287,7 +287,7 @@ py-encaseのインストール状況および現在の環境に関する情報�
 
 ```bash
 mng_encase info                 # 短い一行の説明
-mng_encase info --version       # 例: "PIP module version: 0.0.34"
+mng_encase info --version       # 例: "PIP module version: 0.0.37"
 mng_encase info --long          # パス・python/pipコマンド・各ディレクトリなどの完全な情報
 mng_encase info -s -V           # ラベルなしのバージョン文字列のみ
 ```

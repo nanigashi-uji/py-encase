@@ -296,7 +296,7 @@ Show information about the py-encase installation and the current environment.
 
 ```bash
 mng_encase info                 # short one-line description
-mng_encase info --version       # e.g. "PIP module version: 0.0.34"
+mng_encase info --version       # e.g. "PIP module version: 0.0.37"
 mng_encase info --long          # full dump: paths, python/pip commands, directories...
 mng_encase info -s -V           # bare version string, no label
 ```
